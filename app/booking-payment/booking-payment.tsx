@@ -58,11 +58,15 @@ interface PriceBreakdown {
   currency: string;
 }
 
+interface Evaluation {
+  remarks: string;
+}
+
 export function BookingDetails() {
   const [isPoliciesDialogOpen, setIsPoliciesDialogOpen] = useState(false);
   const [bookingData, setBookingData] = useState<{hotel: any; room: any;}>({hotel: null, room: null});
   const [breakdownData, setBreakdownData] = useState<PriceBreakdown[]>([]);
-  const [evaluationData, setEvaluationData] = useState<any[]>([]);
+  const [evaluationData, setEvaluationData] = useState<Evaluation | null>(null);
   const [roomForms, setRoomForms] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   
@@ -356,7 +360,7 @@ export function BookingDetails() {
     return { totalAdults, totalChildren };
   };
 
-  console.log(bookingData?.room?.TotalPrice)
+  console.log(evaluationData);
 
   const { totalAdults, totalChildren } = calculateTotalGuests();
 
@@ -536,13 +540,13 @@ export function BookingDetails() {
 
                 <hr />
 
-                {/* Remarks */}
+                  {/* Remarks */}
                 <div className="p-6 space-y-4">
                   <h3 className="text-lg font-medium text-[#4D4D4D] mb-4">
                     Remarks
                   </h3>
                   <p className="text-sm text-[#666666]">
-                    {evaluationData?.remarks && <span dangerouslySetInnerHTML={{ __html: evaluationData?.remarks?.[0] || "No remarks" }} /> }
+                    {evaluationData?.remarks && <span dangerouslySetInnerHTML={{ __html: evaluationData?.remarks[0] }} /> || "No remarks"}
                   </p>
                 </div>
               </div>
@@ -583,7 +587,7 @@ export function BookingDetails() {
                             ADULTS
                           </h5>
                           <div className="space-y-4">
-                            {room.adults.map((_, adultIndex:number) => (
+                            {room.adults.map((_ : any, adultIndex: number) => (
                               <div key={adultIndex} className="p-4 border border-gray-200 rounded-lg">
                                 <h6 className="text-sm font-medium text-gray-700 mb-3">Adult {adultIndex + 1}</h6>
                                 <div className="grid md:grid-cols-12 gap-4">

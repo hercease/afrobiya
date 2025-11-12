@@ -171,7 +171,7 @@ const HotelSearchForm: React.FC<HotelSearchFormProps> = ({
 
     setValue("rooms", parsedRooms);
     setRooms(parsedRooms);
-  }, [params]);
+  }, [params, setValue]);
 
   const fetchHotels = useCallback(() => {
     settersRef.current.setLoading(true);

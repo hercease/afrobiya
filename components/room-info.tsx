@@ -93,7 +93,7 @@ export default function RoomInfoSheet({
   roomFeatures,
 }: RoomInfoSheetProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
-console.log("Room Data in RoomInfoSheet:", roomFeatures);
+//console.log("Room Data in RoomInfoSheet:", roomFeatures);
   const images = [
     "/lagos-continental.png",
     "/fairmont-resort-dubai.png",
@@ -162,6 +162,27 @@ function FacilityList({
       );
     }
 
+  const formatRoomDisplay = (roomsArray: string[]): string => {
+    const roomCounts: { [key: string]: number } = {};
+    
+    roomsArray.forEach(room => {
+      // Clean up room names (remove extra spaces, etc.)
+      const cleanRoom = room.trim();
+      roomCounts[cleanRoom] = (roomCounts[cleanRoom] || 0) + 1;
+    });
+    
+    const roomEntries = Object.entries(roomCounts);
+    
+    if (roomEntries.length === 1) {
+      // Single room type (could be multiple quantities)
+      const [roomType, count] = roomEntries[0];
+      return `${count} × ${roomType}`;
+    } else {
+      // Multiple room types
+      return roomEntries.map(([roomType, count]) => `${count} × ${roomType}`).join(' + ');
+    }
+  };
+
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
       <SheetContent
@@ -212,7 +233,7 @@ function FacilityList({
           <div className="space-y-2">
             <div className="flex items-start flex-col gap-6 md:flex-row px-6 justify-between">
               <div className="space-y-2">
-                <h1 className="text-xl font-medium">{roomData?.Rooms[0]}</h1>
+                <h1 className="text-xl font-medium">{formatRoomDisplay(roomData?.Rooms || [])}</h1>
                 <div className="flex items-center text-sm gap-2 text-gray-600">
                   <span>{roomData?.RoomBasis}</span>
                   <span>•</span>

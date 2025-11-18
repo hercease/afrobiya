@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import Image from "next/image";
-import { Info, ChevronLeft, Check, Lock, Clock, ShieldCheck, Star, ConstructionIcon } from "lucide-react";
+import { Info, ChevronLeft, Check, Lock, Clock, ShieldCheck, Star, ConstructionIcon, Mail, AlertTriangle } from "lucide-react";
 import { useForm } from "react-hook-form";
 
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import { getFacilityIcon } from '@/components/facilities-icons';
 
 // Define form types
 interface GuestForm {
+  guestLeaderEmail: string;
   rooms: {
     adults: {
       title: string;
@@ -58,21 +59,52 @@ interface PriceBreakdown {
   currency: string;
 }
 
+interface RoomBreakdown {
+  room_type: string;
+  children: number;
+  cots: number;
+  price_breakdown: PriceBreakdown[];
+}
+
+interface PriceBreakdownResponse {
+  success: boolean;
+  hotel_name: string;
+  hotel_search_code: string;
+  total_rooms: number;
+  rooms: RoomBreakdown[];
+}
+
 interface Evaluation {
   remarks: string;
 }
 
+// Constants
+const BOOKING_TIMEOUT = 30 * 60; // 30 minutes in seconds
+const TIMER_STORAGE_KEY = 'booking_session_start_time';
+
 export function BookingDetails() {
   const [isPoliciesDialogOpen, setIsPoliciesDialogOpen] = useState(false);
   const [bookingData, setBookingData] = useState<{hotel: any; room: any;}>({hotel: null, room: null});
-  const [breakdownData, setBreakdownData] = useState<PriceBreakdown[]>([]);
+  const [breakdownData, setBreakdownData] = useState<PriceBreakdownResponse | null>(null);
   const [evaluationData, setEvaluationData] = useState<Evaluation | null>(null);
   const [roomForms, setRoomForms] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+
+  // Countdown timer state
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [showTimeoutModal, setShowTimeoutModal] = useState(false);
   
   const router = useRouter();
   const params = useSearchParams();
   const pathname = usePathname();
+
+  const validOptions = [
+    "connectingRooms",
+    "adjoiningRooms",
+    "nonSmoking",
+    "honeymoon",
+    "extraBed",
+  ];
 
   // Initialize React Hook Form
   const {
@@ -84,6 +116,7 @@ export function BookingDetails() {
     setValue
   } = useForm<GuestForm>({
     defaultValues: {
+      guestLeaderEmail: "",
       rooms: [],
       options: {
         lateArrivalHours: "",
@@ -96,6 +129,71 @@ export function BookingDetails() {
       }
     }
   });
+
+  // Timer initialization and management
+  const initializeTimer = useCallback(() => {
+    const now = Math.floor(Date.now() / 1000);
+    const storedStartTime = localStorage.getItem(TIMER_STORAGE_KEY);
+    
+    if (storedStartTime) {
+      // Calculate remaining time based on stored start time
+      const startTime = parseInt(storedStartTime);
+      const elapsedTime = now - startTime;
+      const remainingTime = Math.max(0, BOOKING_TIMEOUT - elapsedTime);
+      
+      setTimeLeft(remainingTime);
+      
+      if (remainingTime <= 0) {
+        // Time has already expired
+        setShowTimeoutModal(true);
+      }
+    } else {
+      // First time on this page - set start time
+      localStorage.setItem(TIMER_STORAGE_KEY, now.toString());
+      setTimeLeft(BOOKING_TIMEOUT);
+    }
+  }, []);
+
+  const handleTimeoutRedirect = useCallback(() => {
+    // Clear stored timer data and booking cache
+    localStorage.removeItem(TIMER_STORAGE_KEY);
+    clearBookingCache();
+    
+    // Close modal and redirect back to previous page (hotel results)
+    setShowTimeoutModal(false);
+    router.back();
+  }, [router]);
+
+  const cleanupTimer = () => {
+    localStorage.removeItem(TIMER_STORAGE_KEY);
+  };
+
+  // Initialize timer on component mount
+  useEffect(() => {
+    initializeTimer();
+  }, [initializeTimer]);
+
+  // Countdown timer effect
+  useEffect(() => {
+    if (timeLeft === null || timeLeft <= 0) {
+      if (timeLeft === 0) {
+        // Time's up - show modal
+        setShowTimeoutModal(true);
+      }
+      return;
+    }
+
+    const timerId = setInterval(() => {
+      setTimeLeft((prevTime) => {
+        if (prevTime === null || prevTime <= 1) {
+          return 0;
+        }
+        return prevTime - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timerId);
+  }, [timeLeft]);
 
   // Get URL parameters
   const totalRooms = parseInt(params.get("totalRooms") || "1");
@@ -158,19 +256,6 @@ export function BookingDetails() {
     });
   }, [totalRooms, params, setValue]);
 
-  // Form submission handler
-  const onSubmit = async (data: GuestForm) => {
-    console.log("Form data:", data);
-    
-    try {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      router.push("/booking-confirmation");
-    } catch (error) {
-      console.error("Booking failed:", error);
-    }
-  };
-
-  // Calculate nights between dates
   const calculateNights = () => {
     if (!checkInDate || !checkOutDate) return 0;
     const start = new Date(checkInDate);
@@ -180,6 +265,109 @@ export function BookingDetails() {
   };
 
   const nights = calculateNights();
+
+  // Format time for display (MM:SS)
+  const formatTime = (seconds: number | null) => {
+    if (seconds === null) return "30:00";
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  // Form submission handler
+  const onSubmit = async (data: GuestForm) => {
+    console.log("Form data:", data);
+    
+    try {
+      //setLoading(true);
+
+      // Prepare form data in x-www-form-urlencoded format
+      const formData = new URLSearchParams();
+      
+      // Add basic booking information
+      formData.append('hotelSearchCode', params.get("hotelSearchCode") || "");
+      formData.append('hotelCode', params.get("hotelCode") || "");
+      formData.append('checkInDate', checkInDate);
+      formData.append('nights', nights.toString());
+      formData.append('totalRooms', totalRooms.toString());
+      
+      // Add guest leader email
+      formData.append('guestLeaderEmail', data.guestLeaderEmail);
+      
+      // Add room-wise guest details
+      data.rooms.forEach((room, roomIndex) => {
+        // Add adults for this room
+        room.adults.forEach((adult, adultIndex) => {
+          formData.append(`room${roomIndex + 1}_adult${adultIndex + 1}_title`, adult.title);
+          formData.append(`room${roomIndex + 1}_adult${adultIndex + 1}_firstName`, adult.firstName);
+          formData.append(`room${roomIndex + 1}_adult${adultIndex + 1}_lastName`, adult.lastName);
+        });
+        
+        // Add children for this room
+        room?.children?.forEach((child, childIndex) => {
+          formData.append(`room${roomIndex + 1}_child${childIndex + 1}_title`, child.title);
+          formData.append(`room${roomIndex + 1}_child${childIndex + 1}_firstName`, child.firstName);
+          formData.append(`room${roomIndex + 1}_child${childIndex + 1}_lastName`, child.lastName);
+          formData.append(`room${roomIndex + 1}_child${childIndex + 1}_age`, child.age);
+        });
+      });
+      
+      // Add options
+      formData.append('lateArrivalHours', data.options.lateArrivalHours || "");
+      formData.append('lateArrivalMinutes', data.options.lateArrivalMinutes || "");
+      formData.append('connectingRooms', data.options.connectingRooms ? "true" : "false");
+      formData.append('adjoiningRooms', data.options.adjoiningRooms ? "true" : "false");
+      formData.append('nonSmoking', data.options.nonSmoking ? "true" : "false");
+      formData.append('honeymoon', data.options.honeymoon ? "true" : "false");
+      formData.append('extraBed', data.options.extraBed ? "true" : "false");
+      
+      // Add notes
+      if (data.notes) {
+        formData.append('notes', data.notes);
+      }
+      
+      // Add terms acceptance
+      formData.append('termsAccepted', data.terms ? "true" : "false");
+
+      console.log("Sending form data:", Object.fromEntries(formData));
+
+      // Send booking request
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/bookHotel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("Booking response:", result);
+
+      if (result.success) {
+        // Clear timer and cache on successful booking
+        cleanupTimer();
+        clearBookingCache();
+        
+        // Redirect to confirmation page
+        router.push("/booking-confirmation?booking_code=" + result.booking_reference);
+      } else {
+        // Handle booking failure
+        throw new Error(result.message || "Booking failed");
+      }
+      
+    } catch (error) {
+      console.error("Booking failed:", error);
+      alert(`Booking failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Calculate nights between dates
 
   // Fetch hotel information and price breakdown
   const fetchHotelInformation = useCallback(async () => {
@@ -229,8 +417,8 @@ export function BookingDetails() {
       }
       
       // Set price breakdown data
-      if (priceData && priceData.price_breakdown) {
-        setBreakdownData(priceData.price_breakdown);
+      if (priceData && priceData.success) {
+        setBreakdownData(priceData);
       }
       
     } catch (error) {
@@ -253,31 +441,53 @@ export function BookingDetails() {
 
   // Calculate pricing from breakdown data
   const calculatePricing = () => {
-    if (!breakdownData || breakdownData.length === 0) {
+    if (!breakdownData || !breakdownData.success || !breakdownData.rooms) {
       return {
         subtotal: 0,
         taxes: 0,
         total: 0,
         currency: 'USD',
-        nights: nights
+        nights: nights,
+        perNightPrice: 0
       };
     }
 
-    const subtotal = breakdownData.reduce((sum, item) => sum + item.price, 0);
-    const taxes = bookingData?.room?.TotalPrice - subtotal || 0; // Assuming 10% taxes
+    // Calculate total price across all rooms and their breakdowns
+    const subtotal = breakdownData.rooms.reduce((total, room) => {
+    const roomTotal = room.price_breakdown.reduce((roomSum, breakdown) => {
+      const fromDate = new Date(breakdown.from_date);
+      const toDate = new Date(breakdown.to_date);
+      const diffDays = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24));
+      const displayPrice = diffDays > 1 ? breakdown.price * nights : breakdown.price;
+      
+      return roomSum + displayPrice;
+    }, 0);
+    return total + roomTotal;
+  }, 0);
+
+    // Calculate taxes and fees (room total minus subtotal)
+    const roomTotalPrice = bookingData?.room?.TotalPrice || 0;
+    const taxes = Math.max(0, roomTotalPrice - subtotal);
     const total = subtotal + taxes;
-    const currency = breakdownData[0]?.currency || 'USD';
+    const currency = breakdownData.rooms[0]?.price_breakdown[0]?.currency || 'USD';
+    const perNightPrice = subtotal / nights;
 
     return {
       subtotal,
       taxes,
       total,
       currency,
-      nights: breakdownData.length
+      nights,
+      perNightPrice
     };
   };
 
   const pricing = calculatePricing();
+
+  // Calculate total price for a specific room
+  const calculateRoomTotal = (room: RoomBreakdown) => {
+    return room.price_breakdown.reduce((total, breakdown) => total + breakdown.price, 0);
+  };
 
   const StarRating = ({ rating }: { rating: number }) => {
     return (
@@ -360,8 +570,6 @@ export function BookingDetails() {
     return { totalAdults, totalChildren };
   };
 
-  console.log(evaluationData);
-
   const { totalAdults, totalChildren } = calculateTotalGuests();
 
   return (
@@ -421,14 +629,28 @@ export function BookingDetails() {
             </div>
           </div>
 
-          <div className="absolute left-[8%]">
+          <div className="absolute left-[8%] flex items-center gap-4">
             <Button
               size={"icon"}
-              onClick={() => router.back()}
+              onClick={() => {
+                cleanupTimer();
+                router.back();
+              }}
               className="border border-[#CCCCCC] hover:bg-white/90 bg-white"
             >
               <ChevronLeft className="h-4 w-4 text-[#666]" />
             </Button>
+
+            {/* Countdown Timer Display */}
+            <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm">
+              <Clock className="h-4 w-4 text-[#666]" />
+              <div className="flex flex-col">
+                <span className="text-xs text-[#666]">Time remaining</span>
+                <span className="text-sm font-semibold text-[#333]">
+                  {formatTime(timeLeft)}
+                </span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -531,22 +753,24 @@ export function BookingDetails() {
                   <h3 className="text-lg font-medium text-[#4D4D4D] mb-4">
                     Room Features and Facilities
                   </h3>
-                  <div className="grid grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-1 text-xs md:text-[13px] text-[#666666]">
-                    {bookingData?.hotel?.RoomFacilities?.length > 0 && (
-                      <FacilityList facilities={bookingData.hotel.RoomFacilities} />
-                    )}
-                  </div>
+                  {bookingData?.hotel?.RoomFacilities?.length > 0 && (
+                    <FacilityList facilities={bookingData.hotel.RoomFacilities} maxFacilities={10} />
+                  )}
                 </div>
 
                 <hr />
 
-                  {/* Remarks */}
+                {/* Remarks */}
                 <div className="p-6 space-y-4">
                   <h3 className="text-lg font-medium text-[#4D4D4D] mb-4">
                     Remarks
                   </h3>
                   <p className="text-sm text-[#666666]">
-                    {evaluationData?.remarks && <span dangerouslySetInnerHTML={{ __html: evaluationData?.remarks[0] }} /> || "No remarks"}
+                    {evaluationData?.remarks ? (
+                      <span dangerouslySetInnerHTML={{ __html: evaluationData.remarks }} />
+                    ) : (
+                      "No remarks"
+                    )}
                   </p>
                 </div>
               </div>
@@ -554,7 +778,43 @@ export function BookingDetails() {
               {/* Guest Information Form */}
               <form onSubmit={handleSubmit(onSubmit)}>
                 <div className="rounded-lg border border-[#ccc] py-6">
-                  <div className="px-6">
+                  {/* Guest Leader Email Section */}
+                  <div className="px-6 pb-6 border-b border-gray-200">
+                    <h3 className="text-lg font-medium text-[#333333] mb-4">
+                      Contact Information
+                    </h3>
+                    <div className="space-y-4">
+                      <div>
+                        <Label htmlFor="guestLeaderEmail" className="text-sm font-medium text-gray-700 mb-2 block">
+                          Guest Leader Email Address *
+                        </Label>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                          <Input
+                            id="guestLeaderEmail"
+                            type="email"
+                            placeholder="Enter email address for booking confirmation"
+                            className="pl-10 h-12"
+                            {...register("guestLeaderEmail", {
+                              required: "Email address is required",
+                              pattern: {
+                                value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                                message: "Invalid email address"
+                              }
+                            })}
+                          />
+                        </div>
+                        {errors.guestLeaderEmail && (
+                          <p className="text-red-500 text-xs mt-1">{errors.guestLeaderEmail.message}</p>
+                        )}
+                        <p className="text-xs text-gray-500 mt-1">
+                          We'll send your booking confirmation and updates to this email address
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="px-6 pt-6">
                     <h3 className="text-lg font-medium text-[#333333] mb-4">
                       Guest Details - {totalRooms} Room(s), {totalAdults} Adult(s), {totalChildren} Child(ren)
                     </h3>
@@ -587,7 +847,7 @@ export function BookingDetails() {
                             ADULTS
                           </h5>
                           <div className="space-y-4">
-                            {room.adults.map((_ : any, adultIndex: number) => (
+                            {room.adults.map((_: any, adultIndex: number) => (
                               <div key={adultIndex} className="p-4 border border-gray-200 rounded-lg">
                                 <h6 className="text-sm font-medium text-gray-700 mb-3">Adult {adultIndex + 1}</h6>
                                 <div className="grid md:grid-cols-12 gap-4">
@@ -652,7 +912,7 @@ export function BookingDetails() {
                             CHILDREN
                           </h5>
                           <div className="space-y-4">
-                            {room.children.map((child : any, childIndex: number) => (
+                            {room.children.map((child: any, childIndex: number) => (
                               <div key={childIndex} className="p-4 border border-gray-200 rounded-lg">
                                 <h6 className="text-sm font-medium text-gray-700 mb-3">
                                   Child {childIndex + 1} {child.age && `- Age: ${child.age}`}
@@ -757,10 +1017,10 @@ export function BookingDetails() {
                         </div>
                       </div>
 
-                      <div className="space-y-3">
+                     <div className="space-y-3">
                         {[
                           { id: "connecting", label: "If possible, provide connecting rooms", name: "connectingRooms" },
-                          { id: "adjoining", label: "If possible, provide adjoining rooms", name: "adjoiningRooms" },
+                          { id: "adjoining", label: "If possible, provide adjacent rooms", name: "adjoiningRooms" },
                           { id: "nonsmoking", label: "If possible, provide non-smoking room", name: "nonSmoking" },
                           { id: "honeymoon", label: "Kindly request special treatment as the booking is for Honeymooners", name: "honeymoon" },
                           { id: "extrabed", label: "Request for an extra bed", name: "extraBed" }
@@ -768,7 +1028,10 @@ export function BookingDetails() {
                           <div key={option.id} className="flex items-center gap-4">
                             <Checkbox
                               id={option.id}
-                              {...register(`options.${option.name}` as any)}
+                              checked={watch(`options.${validOptions.includes(option.name) ? option.name : ""}`) || false}
+                              onCheckedChange={(checked) => {
+                                setValue(`options.${validOptions.includes(option.name) ? option.name : ""}`, checked === true, { shouldValidate: true });
+                              }}
                             />
                             <Label
                               htmlFor={option.id}
@@ -778,7 +1041,7 @@ export function BookingDetails() {
                             </Label>
                           </div>
                         ))}
-                      </div>
+                    </div>
                     </div>
                   </div>
 
@@ -803,6 +1066,10 @@ export function BookingDetails() {
                       <Checkbox 
                         id="terms"
                         {...register("terms", { required: "You must agree to the terms and conditions" })}
+                        checked={watch("terms") || false}
+                        onCheckedChange={(checked) => {
+                          setValue("terms", checked === true, { shouldValidate: true });
+                        }}
                       />
                       <Label htmlFor="terms" className="text-sm text-[#808080] text-center">
                         I agree to the{" "}
@@ -821,10 +1088,10 @@ export function BookingDetails() {
 
                     <Button 
                       type="submit"
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || loading}
                       className="w-full bg-[#0000FF] hover:bg-blue-700 text-white py-6 text-sm font-medium"
                     >
-                      {isSubmitting ? (
+                      {isSubmitting || loading ? (
                         <>
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                           Processing...
@@ -848,15 +1115,41 @@ export function BookingDetails() {
                   </div>
 
                   {/* Price Breakdown Details */}
-                  {breakdownData.length > 0 && (
-                    <div className="space-y-2">
-                      <h4 className="text-sm font-medium text-[#333333]">Price Breakdown:</h4>
-                      {breakdownData.map((breakdown, index) => (
-                        <div key={index} className="flex justify-between text-xs text-[#666666]">
-                          <span>
-                            {formatDate(breakdown.from_date)} - {formatDate(breakdown.to_date)}
-                          </span>
-                          <span>{formatCurrency(breakdown.price, breakdown.currency)}</span>
+                  {breakdownData?.success && breakdownData.rooms && (
+                    <div className="space-y-4">
+                      <h4 className="text-sm font-medium text-[#333333]">Room Breakdown:</h4>
+                      {breakdownData.rooms.map((room, roomIndex) => (
+                        <div key={roomIndex} className="border border-gray-200 rounded-lg p-3">
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="text-sm font-medium text-[#333333]">
+                              Room {roomIndex + 1}
+                            </span>
+                            <span className="text-sm font-medium">
+                              {formatCurrency(calculateRoomTotal(room), pricing.currency)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-[#666666] mb-2">
+                            {room.room_type} • {room.children} child(ren)
+                          </p>
+                          
+                          {/* Individual price breakdown for this room */}
+                          <div className="space-y-1 text-xs">
+                            {room.price_breakdown.map((breakdown, breakdownIndex) => {
+                                const fromDate = new Date(breakdown.from_date);
+                                const toDate = new Date(breakdown.to_date);
+                                const diffDays = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24));
+                                const displayPrice = diffDays > 1 ? breakdown.price * nights : breakdown.price;
+                                
+                                return (
+                                  <div key={breakdownIndex} className="flex justify-between text-[#666666]">
+                                    <span>
+                                      {formatDate(breakdown.from_date)} - {formatDate(breakdown.to_date)}
+                                    </span>
+                                    <span>{formatCurrency(displayPrice, breakdown.currency)}</span>
+                                  </div>
+                                );
+                              })}
+                          </div>
                         </div>
                       ))}
                       <hr className="border-gray-200" />
@@ -864,9 +1157,9 @@ export function BookingDetails() {
                   )}
 
                   <div className="flex justify-between text-sm">
-                    <span className="text-[#808080]">Price per night</span>
+                    <span className="text-[#808080]">Price per night(Average)</span>
                     <span className="font-medium">
-                      {breakdownData.length > 0 
+                      {breakdownData?.success && breakdownData?.rooms.length > 0
                         ? formatCurrency(pricing.subtotal / pricing.nights, pricing.currency)
                         : `$${(Number(bookingData?.room?.TotalPrice) / nights).toFixed(2)}`
                       }
@@ -884,33 +1177,33 @@ export function BookingDetails() {
                     <span className="text-[#666666]">Number of nights</span>
                     <span className="font-medium">{pricing.nights || nights}</span>
                   </div>
-                  <hr className="border-gray-200" />
                   <div className="flex justify-between text-sm">
-                    <span className="text-[#666666]">Subtotal</span>
-                    <span className="font-medium">
-                      {breakdownData.length > 0 
-                        ? formatCurrency(pricing.subtotal, pricing.currency)
-                        : `$${(Number(bookingData?.room?.TotalPrice)).toFixed(2)}`
-                      }
-                    </span>
+                      <span className="text-[#666666]">Number of rooms</span>
+                      <span className="font-medium">{breakdownData?.total_rooms || totalRooms}</span>
+                  </div>
+                  <hr className="border-gray-200" />
+                  {/* Subtotal (Sum of all room breakdowns) */}
+                  <div className="flex justify-between text-sm">
+                      <span className="text-[#666666]">Subtotal</span>
+                      <span className="font-medium">
+                        {formatCurrency(pricing.subtotal, pricing.currency)}
+                      </span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-[#666666]">Taxes and fees</span>
                     <span className="font-medium">
-                      {breakdownData.length > 0 
+                      {breakdownData?.success && breakdownData?.rooms.length > 0 
                         ? formatCurrency(pricing.taxes, pricing.currency)
-                        : "$98.70"
+                        : "$0.00"
                       }
                     </span>
                   </div>
                   <hr className="border-gray-200" />
+                  {/* Total (Subtotal + Taxes) */}
                   <div className="flex justify-between text-lg font-semibold">
                     <span>Total Charges</span>
                     <span>
-                      {breakdownData.length > 0 
-                        ? formatCurrency(pricing.total, pricing.currency)
-                        : `$${(164 * nights + 98.70).toFixed(2)}`
-                      }
+                      {formatCurrency(pricing.total, pricing.currency)}
                     </span>
                   </div>
                   <p className="text-xs text-[#808080] text-center">
@@ -922,6 +1215,30 @@ export function BookingDetails() {
           </div>
         </div>
       </div>
+
+      {/* Timeout Modal */}
+      {showTimeoutModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <div className="flex items-center gap-3 mb-4">
+              <AlertTriangle className="h-6 w-6 text-red-600" />
+              <h3 className="text-lg font-semibold text-red-600">Booking Session Expired</h3>
+            </div>
+            <p className="text-gray-700 mb-4">
+              Your 30-minute booking session has ended. This ensures room availability for all guests. 
+              Please start over to continue with your booking.
+            </p>
+            <div className="flex justify-end">
+              <Button
+                onClick={handleTimeoutRedirect}
+                className="bg-[#0000FF] hover:bg-blue-700"
+              >
+                Return to Hotel Search
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

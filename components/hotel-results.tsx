@@ -31,6 +31,28 @@ const CACHE_KEYS = {
   SELECTED_HOTEL: 'booking_selected_hotel'
 };
 
+// Function to format room display
+const formatRoomDisplay = (roomsArray: string[]): string => {
+  const roomCounts: { [key: string]: number } = {};
+  
+  roomsArray.forEach(room => {
+    // Clean up room names (remove extra spaces, etc.)
+    const cleanRoom = room.trim();
+    roomCounts[cleanRoom] = (roomCounts[cleanRoom] || 0) + 1;
+  });
+  
+  const roomEntries = Object.entries(roomCounts);
+  
+  if (roomEntries.length === 1) {
+    // Single room type (could be multiple quantities)
+    const [roomType, count] = roomEntries[0];
+    return `${count} × ${roomType}`;
+  } else {
+    // Multiple room types
+    return roomEntries.map(([roomType, count]) => `${count} × ${roomType}`).join(' + ');
+  }
+};
+
 const HotelResults = ({ loading, results }: { loading?: boolean; results: any }) => {
   const [isPoliciesDialogOpen, setIsPoliciesDialogOpen] = useState(false);
   const [selectedHotel, setSelectedHotel] = useState<string>("");
@@ -112,7 +134,8 @@ const HotelResults = ({ loading, results }: { loading?: boolean; results: any })
       ...room,
       hotelName: hotel.HotelName,
       hotelImage: hotel.HotelImage,
-      hotelAddress: hotel.hotelInfo?.address
+      hotelAddress: hotel.hotelInfo?.address,
+      formattedRoomName: formatRoomDisplay(room.Rooms || []) // Add formatted room name
     };
 
     // Save to cache
@@ -442,8 +465,9 @@ const HotelResults = ({ loading, results }: { loading?: boolean; results: any })
                                   <div className="flex-1 flex flex-col lg:flex-row justify-between">
                                     <div className="flex justify-between flex-col gap-4 py-1 px-4 flex-1">
                                       <div className="space-y-2">
+                                        {/* UPDATED: Use formatted room display */}
                                         <h3 className="text-lg lg:text-xl font-semibold">
-                                          {room['Rooms'][0]}
+                                          {formatRoomDisplay(room.Rooms || [])}
                                         </h3>
 
                                         {hotel.RoomFacilities?.length > 0 && (

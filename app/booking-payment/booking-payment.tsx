@@ -365,6 +365,7 @@ export function BookingDetails() {
     } finally {
       setLoading(false);
     }
+    
   };
 
   // Calculate nights between dates
@@ -1018,29 +1019,29 @@ export function BookingDetails() {
                       </div>
 
                      <div className="space-y-3">
-                        {[
-                          { id: "connecting", label: "If possible, provide connecting rooms", name: "connectingRooms" },
-                          { id: "adjoining", label: "If possible, provide adjacent rooms", name: "adjoiningRooms" },
-                          { id: "nonsmoking", label: "If possible, provide non-smoking room", name: "nonSmoking" },
-                          { id: "honeymoon", label: "Kindly request special treatment as the booking is for Honeymooners", name: "honeymoon" },
-                          { id: "extrabed", label: "Request for an extra bed", name: "extraBed" }
-                        ].map((option) => (
-                          <div key={option.id} className="flex items-center gap-4">
-                            <Checkbox
-                              id={option.id}
-                              checked={watch(`options.${validOptions.includes(option.name) ? option.name : ""}`) || false}
-                              onCheckedChange={(checked) => {
-                                setValue(`options.${validOptions.includes(option.name) ? option.name : ""}`, checked === true, { shouldValidate: true });
-                              }}
-                            />
-                            <Label
-                              htmlFor={option.id}
-                              className="text-sm text-gray-700"
-                            >
-                              {option.label}
-                            </Label>
-                          </div>
-                        ))}
+                      {[
+                        { id: "connecting", label: "If possible, provide connecting rooms", name: "connectingRooms" },
+                        { id: "adjoining", label: "If possible, provide adjacent rooms", name: "adjoiningRooms" },
+                        { id: "nonsmoking", label: "If possible, provide non-smoking room", name: "nonSmoking" },
+                        { id: "honeymoon", label: "Kindly request special treatment as the booking is for Honeymooners", name: "honeymoon" },
+                        { id: "extrabed", label: "Request for an extra bed", name: "extraBed" }
+                      ].map((option) => (
+                        <div key={option.id} className="flex items-center gap-4">
+                          <Checkbox
+                            id={option.id}
+                            checked={watch(`options.${option.name}` as any) || false}
+                            onCheckedChange={(checked) => {
+                              setValue(`options.${option.name}` as any, checked === true, { shouldValidate: true });
+                            }}
+                          />
+                          <Label
+                            htmlFor={option.id}
+                            className="text-sm text-gray-700"
+                          >
+                            {option.label}
+                          </Label>
+                        </div>
+                      ))}
                     </div>
                     </div>
                   </div>

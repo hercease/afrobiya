@@ -4,6 +4,13 @@ import { useState, useCallback, useEffect } from "react";
 import Image from "next/image";
 import { Info, ChevronLeft, Check, Lock, Clock, ShieldCheck, Star, ConstructionIcon, Mail, AlertTriangle } from "lucide-react";
 import { useForm } from "react-hook-form";
+import dynamic from 'next/dynamic';
+import { toast } from 'sonner';
+
+// Dynamic import for Paystack to avoid SSR issues
+const PaystackButton = dynamic(() => import('react-paystack').then(mod => mod.PaystackButton), {
+  ssr: false
+});
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -89,6 +96,10 @@ export function BookingDetails() {
   const [evaluationData, setEvaluationData] = useState<Evaluation | null>(null);
   const [roomForms, setRoomForms] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  
+  // Payment state
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [showPaystackButton, setShowPaystackButton] = useState(false);
 
   // Countdown timer state
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
@@ -111,9 +122,11 @@ export function BookingDetails() {
     register,
     handleSubmit,
     control,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, isValid },
     watch,
-    setValue
+    setValue,
+    getValues,
+    trigger
   } = useForm<GuestForm>({
     defaultValues: {
       guestLeaderEmail: "",
@@ -127,8 +140,281 @@ export function BookingDetails() {
         honeymoon: false,
         extraBed: false
       }
-    }
+    },
+    mode: "onChange"
   });
+
+  // Get URL parameters
+  const totalRooms = parseInt(params.get("totalRooms") || "1");
+  const checkInDate = params.get("checkInDate") || "";
+  const checkOutDate = params.get("checkOutDate") || "";
+
+  const calculateNights = () => {
+    if (!checkInDate || !checkOutDate) return 0;
+    const start = new Date(checkInDate);
+    const end = new Date(checkOutDate);
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  };
+
+  const nights = calculateNights();
+
+  // Calculate pricing from breakdown data
+  const calculatePricing = () => {
+    if (!breakdownData || !breakdownData.success || !breakdownData.rooms) {
+      return {
+        subtotal: 0,
+        taxes: 0,
+        total: 0,
+        currency: 'USD',
+        nights: nights,
+        perNightPrice: 0
+      };
+    }
+
+    const subtotal = breakdownData.rooms.reduce((total, room) => {
+      const roomTotal = room.price_breakdown.reduce((roomSum, breakdown) => {
+        const fromDate = new Date(breakdown.from_date);
+        const toDate = new Date(breakdown.to_date);
+        const diffDays = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24));
+        const displayPrice = diffDays > 1 ? breakdown.price * nights : breakdown.price;
+        
+        return roomSum + displayPrice;
+      }, 0);
+      return total + roomTotal;
+    }, 0);
+
+    const roomTotalPrice = bookingData?.room?.TotalPrice || 0;
+    const taxes = Math.max(0, roomTotalPrice - subtotal);
+    const total = subtotal + taxes;
+    const currency = breakdownData.rooms[0]?.price_breakdown[0]?.currency || 'USD';
+    const perNightPrice = subtotal / nights;
+
+    return {
+      subtotal,
+      taxes,
+      total,
+      currency,
+      nights,
+      perNightPrice
+    };
+  };
+
+  const pricing = calculatePricing();
+
+  // Paystack configuration
+  const paystackConfig = {
+    reference: new Date().getTime().toString(),
+    email: watch("guestLeaderEmail") || "customer@example.com",
+    amount: Math.round(pricing.total * 100), // Convert to kobo
+    publicKey: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "your_public_key_here",
+    currency: "NGN",
+    metadata: {
+      custom_fields: [
+        {
+          display_name: "Booking Type",
+          variable_name: "booking_type",
+          value: "Hotel Booking"
+        },
+        {
+          display_name: "Hotel Name",
+          variable_name: "hotel_name",
+          value: bookingData?.room?.hotelName || "Unknown Hotel"
+        }
+      ]
+    }
+  };
+
+  // Paystack success callback
+  const handlePaystackSuccess = async (reference: any) => {
+    console.log("Payment successful:", reference);
+    setIsProcessingPayment(true);
+
+    const paymentToast = toast.loading('Verifying your payment...');
+    
+    try {
+      // Verify payment with your backend
+      const formData = new URLSearchParams();
+      formData.append('reference', reference.reference);
+
+      const verificationResponse = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/paymentVerification`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString()
+      });
+
+      const verificationResult = await verificationResponse.json();
+
+      if (verificationResult.status) {
+        toast.success('Payment verified successfully!', { id: paymentToast });
+        // Payment verified successfully, submit the booking
+        await submitBookingForm(reference.reference);
+      } else {
+        throw new Error(verificationResult.message || "Payment verification failed");
+      }
+
+    } catch (error) {
+      console.error("Payment process failed:", error);
+      //alert(`Payment process failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      toast.error(`Payment verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { id: paymentToast });
+    } finally {
+      setIsProcessingPayment(false);
+      setShowPaystackButton(false);
+    }
+  };
+
+  // Paystack close callback
+  const handlePaystackClose = () => {
+    console.log("Payment dialog closed");
+    setIsProcessingPayment(false);
+    setShowPaystackButton(false);
+    toast.info('Payment was cancelled. You can try again when ready.');
+  };
+
+  // Paystack component props
+  const paystackComponentProps = {
+    ...paystackConfig,
+    text: "Pay with Paystack",
+    onSuccess: (reference: any) => handlePaystackSuccess(reference),
+    onClose: handlePaystackClose,
+    className: "w-full bg-green-600 hover:bg-green-700 text-white py-3 text-sm font-medium rounded-lg flex items-center justify-center gap-2"
+  };
+
+  // Prepare form data for submission
+  const getFormDataForSubmission = (paymentReference: string) => {
+    const data = getValues();
+    
+    const formData = new URLSearchParams();
+    
+    // Add basic booking information
+    formData.append('hotelSearchCode', params.get("hotelSearchCode") || "");
+    formData.append('hotelCode', params.get("hotelCode") || "");
+    formData.append('checkInDate', checkInDate);
+    formData.append('nights', nights.toString());
+    formData.append('totalRooms', totalRooms.toString());
+    
+    // Add guest leader email
+    formData.append('guestLeaderEmail', data.guestLeaderEmail);
+    
+    // Add room-wise guest details
+    data.rooms.forEach((room, roomIndex) => {
+      room.adults.forEach((adult, adultIndex) => {
+        formData.append(`room${roomIndex + 1}_adult${adultIndex + 1}_title`, adult.title);
+        formData.append(`room${roomIndex + 1}_adult${adultIndex + 1}_firstName`, adult.firstName);
+        formData.append(`room${roomIndex + 1}_adult${adultIndex + 1}_lastName`, adult.lastName);
+      });
+      
+      room?.children?.forEach((child, childIndex) => {
+        formData.append(`room${roomIndex + 1}_child${childIndex + 1}_title`, child.title);
+        formData.append(`room${roomIndex + 1}_child${childIndex + 1}_firstName`, child.firstName);
+        formData.append(`room${roomIndex + 1}_child${childIndex + 1}_lastName`, child.lastName);
+        formData.append(`room${roomIndex + 1}_child${childIndex + 1}_age`, child.age);
+      });
+    });
+    
+    // Add options
+    formData.append('lateArrivalHours', data.options.lateArrivalHours || "");
+    formData.append('lateArrivalMinutes', data.options.lateArrivalMinutes || "");
+    formData.append('connectingRooms', data.options.connectingRooms ? "true" : "false");
+    formData.append('adjoiningRooms', data.options.adjoiningRooms ? "true" : "false");
+    formData.append('nonSmoking', data.options.nonSmoking ? "true" : "false");
+    formData.append('honeymoon', data.options.honeymoon ? "true" : "false");
+    formData.append('extraBed', data.options.extraBed ? "true" : "false");
+    
+    // Add notes
+    if (data.notes) {
+      formData.append('notes', data.notes);
+    }
+    
+    // Add terms acceptance
+    formData.append('termsAccepted', data.terms ? "true" : "false");
+
+    // Add payment information
+    formData.append('paymentMethod', 'paystack');
+    formData.append('paymentAmount', pricing.total.toString());
+    formData.append('paymentReference', paymentReference);
+
+    return formData;
+  };
+
+  // Submit booking form
+  const submitBookingForm = async (paymentReference: string) => {
+    const bookingToast = toast.loading('Processing your booking...');
+    
+    try {
+      const formData = getFormDataForSubmission(paymentReference);
+
+      console.log("Submitting booking form");
+
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/bookHotel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log("Booking response:", result);
+
+      if (result.success) {
+        toast.success('Booking confirmed! Redirecting...', { id: bookingToast });
+        // Clear timer and cache on successful booking
+        cleanupTimer();
+        clearBookingCache();
+        
+        // Redirect to confirmation page
+        router.push("/booking-confirmation?booking_code=" + result.booking_reference);
+      } else {
+        throw new Error(result.message || "Booking failed");
+      }
+      
+    } catch (error) {
+      console.error("Booking submission failed:", error);
+      toast.error(`Booking failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { id: bookingToast });
+    }
+  };
+
+  // Form submission handler - Only triggers Paystack after validation
+  const onSubmit = async (data: GuestForm) => {
+    console.log("Form validation passed, showing Paystack button");
+    
+    // Check if amount is valid
+    if (pricing.total <= 0) {
+      toast.error('Invalid booking amount. Please try again.');
+      return;
+    }
+
+    // If form is valid, show Paystack button
+    setShowPaystackButton(true);
+  };
+
+  // Handle form validation before showing Paystack
+  const handlePaystackInitiation = async () => {
+    // Trigger form validation
+    const isValid = await trigger();
+    
+    if (!isValid) {
+      toast.error('Please fix the form errors before proceeding to payment.');
+      return;
+    }
+
+    // Check if amount is valid
+    if (pricing.total <= 0) {
+      toast.error('Invalid booking amount. Please try again.');
+      return;
+    }
+
+    // If everything is valid, show Paystack button
+    setShowPaystackButton(true);
+    toast.success('Form validated! Opening payment gateway...');
+  };
 
   // Timer initialization and management
   const initializeTimer = useCallback(() => {
@@ -136,7 +422,6 @@ export function BookingDetails() {
     const storedStartTime = localStorage.getItem(TIMER_STORAGE_KEY);
     
     if (storedStartTime) {
-      // Calculate remaining time based on stored start time
       const startTime = parseInt(storedStartTime);
       const elapsedTime = now - startTime;
       const remainingTime = Math.max(0, BOOKING_TIMEOUT - elapsedTime);
@@ -144,22 +429,16 @@ export function BookingDetails() {
       setTimeLeft(remainingTime);
       
       if (remainingTime <= 0) {
-        // Time has already expired
         setShowTimeoutModal(true);
       }
     } else {
-      // First time on this page - set start time
-      localStorage.setItem(TIMER_STORAGE_KEY, now.toString());
-      setTimeLeft(BOOKING_TIMEOUT);
+      router.back();
     }
-  }, []);
+  }, [router]);
 
   const handleTimeoutRedirect = useCallback(() => {
-    // Clear stored timer data and booking cache
     localStorage.removeItem(TIMER_STORAGE_KEY);
     clearBookingCache();
-    
-    // Close modal and redirect back to previous page (hotel results)
     setShowTimeoutModal(false);
     router.back();
   }, [router]);
@@ -177,7 +456,6 @@ export function BookingDetails() {
   useEffect(() => {
     if (timeLeft === null || timeLeft <= 0) {
       if (timeLeft === 0) {
-        // Time's up - show modal
         setShowTimeoutModal(true);
       }
       return;
@@ -195,11 +473,6 @@ export function BookingDetails() {
     return () => clearInterval(timerId);
   }, [timeLeft]);
 
-  // Get URL parameters
-  const totalRooms = parseInt(params.get("totalRooms") || "1");
-  const checkInDate = params.get("checkInDate") || "";
-  const checkOutDate = params.get("checkOutDate") || "";
-
   // Calculate total guests and initialize forms by room
   useEffect(() => {
     const roomFormsData = [];
@@ -214,7 +487,6 @@ export function BookingDetails() {
       const adultForms = [];
       const childrenForms = [];
       
-      // Create form entries for each adult in the room
       for (let j = 1; j <= adults; j++) {
         adultForms.push({
           title: "mr",
@@ -224,7 +496,6 @@ export function BookingDetails() {
         totalAdults++;
       }
       
-      // Create form entries for each child in the room
       const childAgesArray = childrenAges.split(',').filter(age => age.trim() !== '');
       for (let k = 1; k <= children; k++) {
         const age = childAgesArray[k - 1] || "";
@@ -245,7 +516,6 @@ export function BookingDetails() {
     
     setRoomForms(roomFormsData);
     
-    // Initialize form values
     roomFormsData.forEach((room, roomIndex) => {
       room.adults.forEach((adult, adultIndex) => {
         setValue(`rooms.${roomIndex}.adults.${adultIndex}`, adult);
@@ -256,16 +526,6 @@ export function BookingDetails() {
     });
   }, [totalRooms, params, setValue]);
 
-  const calculateNights = () => {
-    if (!checkInDate || !checkOutDate) return 0;
-    const start = new Date(checkInDate);
-    const end = new Date(checkOutDate);
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  };
-
-  const nights = calculateNights();
-
   // Format time for display (MM:SS)
   const formatTime = (seconds: number | null) => {
     if (seconds === null) return "30:00";
@@ -273,102 +533,6 @@ export function BookingDetails() {
     const remainingSeconds = seconds % 60;
     return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
   };
-
-  // Form submission handler
-  const onSubmit = async (data: GuestForm) => {
-    console.log("Form data:", data);
-    
-    try {
-      //setLoading(true);
-
-      // Prepare form data in x-www-form-urlencoded format
-      const formData = new URLSearchParams();
-      
-      // Add basic booking information
-      formData.append('hotelSearchCode', params.get("hotelSearchCode") || "");
-      formData.append('hotelCode', params.get("hotelCode") || "");
-      formData.append('checkInDate', checkInDate);
-      formData.append('nights', nights.toString());
-      formData.append('totalRooms', totalRooms.toString());
-      
-      // Add guest leader email
-      formData.append('guestLeaderEmail', data.guestLeaderEmail);
-      
-      // Add room-wise guest details
-      data.rooms.forEach((room, roomIndex) => {
-        // Add adults for this room
-        room.adults.forEach((adult, adultIndex) => {
-          formData.append(`room${roomIndex + 1}_adult${adultIndex + 1}_title`, adult.title);
-          formData.append(`room${roomIndex + 1}_adult${adultIndex + 1}_firstName`, adult.firstName);
-          formData.append(`room${roomIndex + 1}_adult${adultIndex + 1}_lastName`, adult.lastName);
-        });
-        
-        // Add children for this room
-        room?.children?.forEach((child, childIndex) => {
-          formData.append(`room${roomIndex + 1}_child${childIndex + 1}_title`, child.title);
-          formData.append(`room${roomIndex + 1}_child${childIndex + 1}_firstName`, child.firstName);
-          formData.append(`room${roomIndex + 1}_child${childIndex + 1}_lastName`, child.lastName);
-          formData.append(`room${roomIndex + 1}_child${childIndex + 1}_age`, child.age);
-        });
-      });
-      
-      // Add options
-      formData.append('lateArrivalHours', data.options.lateArrivalHours || "");
-      formData.append('lateArrivalMinutes', data.options.lateArrivalMinutes || "");
-      formData.append('connectingRooms', data.options.connectingRooms ? "true" : "false");
-      formData.append('adjoiningRooms', data.options.adjoiningRooms ? "true" : "false");
-      formData.append('nonSmoking', data.options.nonSmoking ? "true" : "false");
-      formData.append('honeymoon', data.options.honeymoon ? "true" : "false");
-      formData.append('extraBed', data.options.extraBed ? "true" : "false");
-      
-      // Add notes
-      if (data.notes) {
-        formData.append('notes', data.notes);
-      }
-      
-      // Add terms acceptance
-      formData.append('termsAccepted', data.terms ? "true" : "false");
-
-      console.log("Sending form data:", Object.fromEntries(formData));
-
-      // Send booking request
-      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/bookHotel`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: formData.toString(),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-      console.log("Booking response:", result);
-
-      if (result.success) {
-        // Clear timer and cache on successful booking
-        cleanupTimer();
-        clearBookingCache();
-        
-        // Redirect to confirmation page
-        router.push("/booking-confirmation?booking_code=" + result.booking_reference);
-      } else {
-        // Handle booking failure
-        throw new Error(result.message || "Booking failed");
-      }
-      
-    } catch (error) {
-      console.error("Booking failed:", error);
-      alert(`Booking failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setLoading(false);
-    }
-    
-  };
-
-  // Calculate nights between dates
 
   // Fetch hotel information and price breakdown
   const fetchHotelInformation = useCallback(async () => {
@@ -379,7 +543,6 @@ export function BookingDetails() {
 
     try {
       const [evaluationResponse, priceResponse] = await Promise.all([
-        // bookingEvaluation request
         fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/bookingEvaluation`, {
           method: "POST",
           headers: {
@@ -392,7 +555,6 @@ export function BookingDetails() {
           }).toString(),
         }),
         
-        // price_breakdown request
         fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/priceBreakdown`, {
           method: "POST",
           headers: {
@@ -412,18 +574,17 @@ export function BookingDetails() {
       console.log("Booking Evaluation Data:", evaluationData);
       console.log("Price Breakdown Data:", priceData);
       
-      // Set booking data
       if (evaluationData) {
         setEvaluationData(evaluationData);
       }
       
-      // Set price breakdown data
       if (priceData && priceData.success) {
         setBreakdownData(priceData);
       }
       
     } catch (error) {
       console.error("Error fetching data:", error);
+      toast.error('Failed to load hotel information. Please refresh the page.');
     } finally {
       setLoading(false);
     }
@@ -439,51 +600,6 @@ export function BookingDetails() {
       setBookingData(cached);
     }
   }, []);
-
-  // Calculate pricing from breakdown data
-  const calculatePricing = () => {
-    if (!breakdownData || !breakdownData.success || !breakdownData.rooms) {
-      return {
-        subtotal: 0,
-        taxes: 0,
-        total: 0,
-        currency: 'USD',
-        nights: nights,
-        perNightPrice: 0
-      };
-    }
-
-    // Calculate total price across all rooms and their breakdowns
-    const subtotal = breakdownData.rooms.reduce((total, room) => {
-    const roomTotal = room.price_breakdown.reduce((roomSum, breakdown) => {
-      const fromDate = new Date(breakdown.from_date);
-      const toDate = new Date(breakdown.to_date);
-      const diffDays = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24));
-      const displayPrice = diffDays > 1 ? breakdown.price * nights : breakdown.price;
-      
-      return roomSum + displayPrice;
-    }, 0);
-    return total + roomTotal;
-  }, 0);
-
-    // Calculate taxes and fees (room total minus subtotal)
-    const roomTotalPrice = bookingData?.room?.TotalPrice || 0;
-    const taxes = Math.max(0, roomTotalPrice - subtotal);
-    const total = subtotal + taxes;
-    const currency = breakdownData.rooms[0]?.price_breakdown[0]?.currency || 'USD';
-    const perNightPrice = subtotal / nights;
-
-    return {
-      subtotal,
-      taxes,
-      total,
-      currency,
-      nights,
-      perNightPrice
-    };
-  };
-
-  const pricing = calculatePricing();
 
   // Calculate total price for a specific room
   const calculateRoomTotal = (room: RoomBreakdown) => {
@@ -1060,8 +1176,9 @@ export function BookingDetails() {
                   </div>
                 </div>
 
-                {/* Terms and Book button */}
+                {/* Payment Section - Only Paystack */}
                 <div className="border border-[#ccc] rounded-lg p-6 mt-6">
+                 
                   <div className="mt-8 space-y-4">
                     <div className="flex items-center justify-center gap-2">
                       <Checkbox 
@@ -1087,20 +1204,32 @@ export function BookingDetails() {
                       <p className="text-red-500 text-xs text-center">{errors.terms.message}</p>
                     )}
 
-                    <Button 
-                      type="submit"
-                      disabled={isSubmitting || loading}
-                      className="w-full bg-[#0000FF] hover:bg-blue-700 text-white py-6 text-sm font-medium"
-                    >
-                      {isSubmitting || loading ? (
-                        <>
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                          Processing...
-                        </>
-                      ) : (
-                        "Book and pay"
-                      )}
-                    </Button>
+                    {/* Payment Button */}
+                    {!showPaystackButton ? (
+                      <Button 
+                        type="submit"
+                        disabled={isSubmitting || loading || isProcessingPayment}
+                        className="w-full bg-[#0000FF] hover:bg-blue-700 text-white py-6 text-sm font-medium"
+                        onClick={handlePaystackInitiation}
+                      >
+                        {isProcessingPayment ? (
+                          <>
+                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                            Processing...
+                          </>
+                        ) : (
+                          "Proceed to Payment"
+                        )}
+                      </Button>
+                    ) : (
+                      <PaystackButton {...paystackComponentProps} />
+                    )}
+
+                    {/* Payment Security Notice */}
+                    <div className="flex items-center justify-center gap-2 text-xs text-green-600 mt-2">
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>Your payment is secure and encrypted</span>
+                    </div>
                   </div>
                 </div>
               </form>

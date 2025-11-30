@@ -28,7 +28,8 @@ interface HotelResultsProps {
 const CACHE_KEYS = {
   HOTEL_INFO: 'booking_hotel_info',
   ROOM_INFO: 'booking_room_info',
-  SELECTED_HOTEL: 'booking_selected_hotel'
+  SELECTED_HOTEL: 'booking_selected_hotel',
+  TIMER_STORAGE_KEY : 'booking_session_start_time'
 };
 
 // Function to format room display
@@ -137,6 +138,10 @@ const HotelResults = ({ loading, results }: { loading?: boolean; results: any })
       hotelAddress: hotel.hotelInfo?.address,
       formattedRoomName: formatRoomDisplay(room.Rooms || []) // Add formatted room name
     };
+
+    localStorage.removeItem(CACHE_KEYS.TIMER_STORAGE_KEY);
+    const now = Math.floor(Date.now() / 1000);
+    localStorage.setItem(CACHE_KEYS.TIMER_STORAGE_KEY, now.toString());
 
     // Save to cache
     saveToCache(CACHE_KEYS.HOTEL_INFO, hotelInfo);

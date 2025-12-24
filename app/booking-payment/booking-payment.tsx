@@ -5,7 +5,8 @@ import Image from "next/image";
 import { Info, ChevronLeft, Check, Lock, Clock, ShieldCheck, Star, ConstructionIcon, Mail, AlertTriangle } from "lucide-react";
 import { useForm } from "react-hook-form";
 import dynamic from 'next/dynamic';
-import { toast } from 'sonner';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 // Dynamic import for Paystack to avoid SSR issues
 const PaystackButton = dynamic(() => import('react-paystack').then(mod => mod.PaystackButton), {
@@ -96,6 +97,7 @@ export function BookingDetails() {
   const [evaluationData, setEvaluationData] = useState<Evaluation | null>(null);
   const [roomForms, setRoomForms] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isInitializingPayment, setIsInitializingPayment] = useState(false);
   
   // Payment state
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
@@ -148,6 +150,7 @@ export function BookingDetails() {
   const totalRooms = parseInt(params.get("totalRooms") || "1");
   const checkInDate = params.get("checkInDate") || "";
   const checkOutDate = params.get("checkOutDate") || "";
+
 
   const calculateNights = () => {
     if (!checkInDate || !checkOutDate) return 0;
@@ -248,17 +251,16 @@ export function BookingDetails() {
       const verificationResult = await verificationResponse.json();
 
       if (verificationResult.status) {
-        toast.success('Payment verified successfully!', { id: paymentToast });
+        toast.update(paymentToast, { render: "Payment verified successfully!", type: "success", isLoading: false });
         // Payment verified successfully, submit the booking
         await submitBookingForm(reference.reference);
       } else {
-        throw new Error(verificationResult.message || "Payment verification failed");
+        toast.update(paymentToast, { render: verificationResult.message || "Payment verification failed", type: "error", isLoading: false });
       }
 
     } catch (error) {
       console.error("Payment process failed:", error);
-      //alert(`Payment process failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      toast.error(`Payment verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { id: paymentToast });
+      toast.update(paymentToast, { render: `Payment verification failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "error", isLoading: false });
     } finally {
       setIsProcessingPayment(false);
       setShowPaystackButton(false);
@@ -364,7 +366,7 @@ export function BookingDetails() {
       console.log("Booking response:", result);
 
       if (result.success) {
-        toast.success('Booking confirmed! Redirecting...', { id: bookingToast });
+        toast.update(bookingToast, { render: "Booking confirmed! Redirecting...", type: "success", isLoading: false });
         // Clear timer and cache on successful booking
         cleanupTimer();
         clearBookingCache();
@@ -377,7 +379,8 @@ export function BookingDetails() {
       
     } catch (error) {
       console.error("Booking submission failed:", error);
-      toast.error(`Booking failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { id: bookingToast });
+      toast.update(bookingToast, { render: `Booking failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "success", isLoading: false });
+      
     }
   };
 
@@ -412,8 +415,14 @@ export function BookingDetails() {
     }
 
     // If everything is valid, show Paystack button
+    setIsInitializingPayment(true);
     setShowPaystackButton(true);
     toast.success('Form validated! Opening payment gateway...');
+
+     // Reset the initializing state after a short delay
+    setTimeout(() => {
+      setIsInitializingPayment(false);
+    }, 1000);
   };
 
   // Timer initialization and management
@@ -571,7 +580,7 @@ export function BookingDetails() {
       const evaluationData = await evaluationResponse.json();
       const priceData = await priceResponse.json();
 
-      console.log("Booking Evaluation Data:", evaluationData);
+      console.log("Booking Evaluation Data:", evaluationData.remarks);
       console.log("Price Breakdown Data:", priceData);
       
       if (evaluationData) {
@@ -691,6 +700,19 @@ export function BookingDetails() {
 
   return (
     <>
+      <ToastContainer
+        position="top-right"
+        autoClose={5000}
+        hideProgressBar={false}
+        newestOnTop
+        closeOnClick
+        rtl={false}
+        pauseOnFocusLoss
+        draggable
+        pauseOnHover
+        theme="light"
+      />
+
       <div className="min-h-screen">
         <div className="h-60 md:h-52 bg-[#F8F9FA] mb-8 flex flex-col gap-12 p-6 relative">
           <div className="sm:mt-0 mt-12 max-w-lg mx-auto w-full flex items-center justify-between">
@@ -884,7 +906,15 @@ export function BookingDetails() {
                   </h3>
                   <p className="text-sm text-[#666666]">
                     {evaluationData?.remarks ? (
-                      <span dangerouslySetInnerHTML={{ __html: evaluationData.remarks }} />
+                      typeof evaluationData.remarks === 'string' ? (
+                        <span dangerouslySetInnerHTML={{ __html: evaluationData.remarks }} />
+                      ) : (
+                        <>
+                          {Object.values(evaluationData.remarks).map((item, index) => (
+                            <span key={index} dangerouslySetInnerHTML={{ __html: item as string }} />
+                          ))}
+                        </>
+                      )
                     ) : (
                       "No remarks"
                     )}
@@ -1206,24 +1236,37 @@ export function BookingDetails() {
 
                     {/* Payment Button */}
                     {!showPaystackButton ? (
-                      <Button 
-                        type="submit"
-                        disabled={isSubmitting || loading || isProcessingPayment}
-                        className="w-full bg-[#0000FF] hover:bg-blue-700 text-white py-6 text-sm font-medium"
-                        onClick={handlePaystackInitiation}
-                      >
-                        {isProcessingPayment ? (
-                          <>
-                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                            Processing...
-                          </>
-                        ) : (
-                          "Proceed to Payment"
-                        )}
-                      </Button>
-                    ) : (
-                      <PaystackButton {...paystackComponentProps} />
-                    )}
+                    <Button 
+                      type="button"
+                      disabled={isSubmitting || loading || isProcessingPayment || isInitializingPayment}
+                      className="w-full bg-[#0000FF] hover:bg-blue-700 text-white py-6 text-sm font-medium disabled:bg-blue-400"
+                      onClick={handlePaystackInitiation}
+                    >
+                      {isInitializingPayment || isProcessingPayment ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                          Processing...
+                        </>
+                      ) : (
+                        "Proceed to Payment"
+                      )}
+                    </Button>
+                  ) : (
+                    <div className="relative">
+                      <PaystackButton 
+                        {...paystackComponentProps}
+                        text={isProcessingPayment ? "Processing..." : "Pay with Paystack"}
+                      />
+                      {(isProcessingPayment || isInitializingPayment) && (
+                        <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded-lg">
+                          <div className="flex flex-col items-center gap-2">
+                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+                            <span className="text-sm text-gray-700">Processing payment...</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                     {/* Payment Security Notice */}
                     <div className="flex items-center justify-center gap-2 text-xs text-green-600 mt-2">

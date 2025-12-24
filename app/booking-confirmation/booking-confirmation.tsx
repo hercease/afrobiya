@@ -92,6 +92,7 @@ export function BookingConfirmation() {
     const formData = new URLSearchParams();
 
     try {
+
       formData.append('bookingCode', params.get("booking_code") || "");
 
       const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/bookingDetails`, {
@@ -111,9 +112,31 @@ export function BookingConfirmation() {
     }
   }, [params]);
 
+  const fetchBookingStatus = useCallback(async () => {
+    const formData = new URLSearchParams();
+    formData.append('bookingCode', params.get("booking_code") || "");
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/voucherRequest`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
+      });
+      const data = await response.json();
+      console.log(data);
+
+    } catch (error) {
+      console.error("Error fetching booking data:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [params]);
+
   React.useEffect(() => {
     fetchBookingData();
-  }, [fetchBookingData]);
+    fetchBookingStatus();
+  }, [fetchBookingData, fetchBookingStatus]);
 
   // Format date function
   const formatDate = (dateString: string): string => {

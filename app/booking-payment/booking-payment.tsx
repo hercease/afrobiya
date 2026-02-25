@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import Image from "next/image";
-import { Info, ChevronLeft, Check, Lock, Clock, ShieldCheck, Star, ConstructionIcon, Mail, AlertTriangle } from "lucide-react";
+import { Info, ChevronLeft, Check, Lock, Clock, ShieldCheck, Star, Mail, AlertTriangle, User, Calendar, Home, CreditCard, Phone, FileText, X } from "lucide-react";
 import { useForm } from "react-hook-form";
 import dynamic from 'next/dynamic';
 import { ToastContainer, toast } from 'react-toastify';
@@ -27,13 +27,13 @@ import {
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import HotelPoliciesDialog from "@/components/hotel-info-dilaog";
 import { getCachedBookingData, clearBookingCache } from '@/components/bookingCache';
 import { getFacilityIcon } from '@/components/facilities-icons';
 
 // Define form types
 interface GuestForm {
   guestLeaderEmail: string;
+  guestLeaderPhone?: string;
   rooms: {
     adults: {
       title: string;
@@ -83,7 +83,8 @@ interface PriceBreakdownResponse {
 }
 
 interface Evaluation {
-  remarks: string;
+  remarks: string[] | string;
+  price: number;
 }
 
 // Constants
@@ -111,14 +112,6 @@ export function BookingDetails() {
   const params = useSearchParams();
   const pathname = usePathname();
 
-  const validOptions = [
-    "connectingRooms",
-    "adjoiningRooms",
-    "nonSmoking",
-    "honeymoon",
-    "extraBed",
-  ];
-
   // Initialize React Hook Form
   const {
     register,
@@ -132,6 +125,7 @@ export function BookingDetails() {
   } = useForm<GuestForm>({
     defaultValues: {
       guestLeaderEmail: "",
+      guestLeaderPhone: "",
       rooms: [],
       options: {
         lateArrivalHours: "",
@@ -150,7 +144,6 @@ export function BookingDetails() {
   const totalRooms = parseInt(params.get("totalRooms") || "1");
   const checkInDate = params.get("checkInDate") || "";
   const checkOutDate = params.get("checkOutDate") || "";
-
 
   const calculateNights = () => {
     if (!checkInDate || !checkOutDate) return 0;
@@ -187,7 +180,7 @@ export function BookingDetails() {
       return total + roomTotal;
     }, 0);
 
-    const roomTotalPrice = bookingData?.room?.TotalPrice || 0;
+    const roomTotalPrice = evaluationData && evaluationData?.price > 0 ? evaluationData.price : bookingData?.room?.TotalPrice || 0;
     const taxes = Math.max(0, roomTotalPrice - subtotal);
     const total = subtotal + taxes;
     const currency = breakdownData.rooms[0]?.price_breakdown[0]?.currency || 'USD';
@@ -299,6 +292,9 @@ export function BookingDetails() {
     
     // Add guest leader email
     formData.append('guestLeaderEmail', data.guestLeaderEmail);
+    if (data.guestLeaderPhone) {
+      formData.append('guestLeaderPhone', data.guestLeaderPhone);
+    }
     
     // Add room-wise guest details
     data.rooms.forEach((room, roomIndex) => {
@@ -379,7 +375,7 @@ export function BookingDetails() {
       
     } catch (error) {
       console.error("Booking submission failed:", error);
-      toast.update(bookingToast, { render: `Booking failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "success", isLoading: false });
+      toast.update(bookingToast, { render: `Booking failed: ${error instanceof Error ? error.message : 'Unknown error'}`, type: "error", isLoading: false });
       
     }
   };
@@ -419,7 +415,7 @@ export function BookingDetails() {
     setShowPaystackButton(true);
     toast.success('Form validated! Opening payment gateway...');
 
-     // Reset the initializing state after a short delay
+    // Reset the initializing state after a short delay
     setTimeout(() => {
       setIsInitializingPayment(false);
     }, 1000);
@@ -580,7 +576,7 @@ export function BookingDetails() {
       const evaluationData = await evaluationResponse.json();
       const priceData = await priceResponse.json();
 
-      console.log("Booking Evaluation Data:", evaluationData.remarks);
+      console.log("Booking Evaluation Data:", evaluationData);
       console.log("Price Breakdown Data:", priceData);
       
       if (evaluationData) {
@@ -621,7 +617,7 @@ export function BookingDetails() {
         {[1, 2, 3, 4, 5].map((star) => (
           <Star
             key={star}
-            className={`h-4 w-4 ${
+            className={`h-3 w-3 ${
               star <= rating ? "fill-[#FC5D01] text-[#FC5D01]" : "text-gray-300"
             }`}
           />
@@ -642,17 +638,17 @@ export function BookingDetails() {
         : facilities;
   
       return (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1">
           {facilitiesToDisplay.map((facility, index) => {
             const IconComponent = getFacilityIcon(facility);
             return (
-              <div
+              <span
                 key={index}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs border border-gray-200 hover:bg-gray-200 transition-colors"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 text-xs"
               >
-                <IconComponent className="h-3 w-3 flex-shrink-0" />
-                <span className="whitespace-nowrap">{facility}</span>
-              </div>
+                <IconComponent className="h-3 w-3" />
+                <span>{facility}</span>
+              </span>
             );
           })}
         </div>
@@ -670,8 +666,7 @@ export function BookingDetails() {
     return date.toLocaleDateString('en-US', { 
       weekday: 'short', 
       month: 'short', 
-      day: 'numeric', 
-      year: 'numeric' 
+      day: 'numeric' 
     });
   };
 
@@ -698,6 +693,70 @@ export function BookingDetails() {
 
   const { totalAdults, totalChildren } = calculateTotalGuests();
 
+  // Extract cancellation policy from remarks using regex
+  const extractCancellationPolicy = () => {
+    if (!evaluationData?.remarks) return null;
+    
+    const remarks = Array.isArray(evaluationData.remarks) 
+      ? evaluationData.remarks 
+      : [evaluationData.remarks];
+    
+    // Regex to find cancellation policy pattern
+    const cxlRegex = /STARTING\s+(\d{2}\/\d{2}\/\d{4})\s+CXL-PENALTY\s+FEE\s+IS\s+(\d+\.?\d*)%\s+OF\s+BOOKING\s+PRICE\.?(.*?)(?=\.|$)/i;
+    
+    for (const remark of remarks) {
+      const match = remark.match(cxlRegex);
+      if (match) {
+        return {
+          startingDate: match[1],
+          penaltyPercentage: match[2],
+          additionalInfo: match[3]?.trim() || ""
+        };
+      }
+    }
+    return null;
+  };
+
+  // Get all remarks except cancellation policy
+  const getOtherRemarks = () => {
+    if (!evaluationData?.remarks) return [];
+    
+    const remarks = Array.isArray(evaluationData.remarks) 
+      ? evaluationData.remarks 
+      : [evaluationData.remarks];
+    
+    const cxlRegex = /STARTING\s+\d{2}\/\d{2}\/\d{4}\s+CXL-PENALTY\s+FEE\s+IS\s+\d+\.?\d*%\s+OF\s+BOOKING\s+PRICE\.?.*?/i;
+    
+    return remarks.filter(remark => !cxlRegex.test(remark));
+  };
+
+  const cancellationPolicy = extractCancellationPolicy();
+  const otherRemarks = getOtherRemarks();
+
+  const renderRemark = (remark: string, index: number) => {
+  // First decode HTML entities
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = remark;
+  const decodedRemark = textarea.value;
+  
+  // Check if the decoded content contains HTML tags
+  const containsHtml = /<[a-z][\s\S]*>/i.test(decodedRemark);
+  
+  return (
+    <div key={index} className="border-b border-gray-100 last:border-0 pb-3 last:pb-0">
+      {containsHtml ? (
+        <div 
+          className="text-sm text-gray-700 prose prose-sm max-w-none"
+          dangerouslySetInnerHTML={{ __html: decodedRemark }} 
+        />
+      ) : (
+        <p className="text-sm text-gray-700">{decodedRemark}</p>
+      )}
+    </div>
+  );
+};
+
+
   return (
     <>
       <ToastContainer
@@ -713,674 +772,428 @@ export function BookingDetails() {
         theme="light"
       />
 
-      <div className="min-h-screen">
-        <div className="h-60 md:h-52 bg-[#F8F9FA] mb-8 flex flex-col gap-12 p-6 relative">
-          <div className="sm:mt-0 mt-12 max-w-lg mx-auto w-full flex items-center justify-between">
-            <div className="flex items-center">
-              <Lock className="w-4 h-4 text-[#808080]" />
-              <span className="ml-2 text-xs text-[#808080] tracking-widest">
-                Secure Transactions
-              </span>
-            </div>
-
-            <div className="flex items-center">
-              <Clock className="w-4 h-4 text-[#808080]" />
-              <span className="ml-2 text-xs text-[#808080] tracking-widest">
-                24-Hour Service{" "}
-              </span>
-            </div>
-
-            <div className="flex items-center">
-              <ShieldCheck className="w-4 h-4 text-[#808080]" />
-              <span className="ml-2 text-xs text-[#808080] tracking-widest">
-                Trusted Payments{" "}
-              </span>
-            </div>
-          </div>
-          <div className="max-w-xl w-full mx-auto flex items-center justify-between relative">
-            <div className="h-[1px] w-2/5 flex justify-center left-8 bg-[#0000ff] absolute top-5 z-0"></div>
-            <div className="h-[1px] w-2/5 flex justify-center right-16 bg-[#666] absolute top-5 z-0"></div>
-            <div className="flex items-center flex-col gap-2">
-              <div className="w-10 h-10 bg-[#0000FF] z-10 rounded-full flex items-center justify-center">
-                <Check className="w-4 h-4 text-white" />
+      <div className="min-h-screen bg-gray-50">
+        {/* Compact Header */}
+        <div className="bg-white border-b sticky top-0 z-10">
+          <div className="max-w-7xl mx-auto px-4 py-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => {
+                    cleanupTimer();
+                    router.back();
+                  }}
+                  className="h-8 w-8"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                
+                {/* Compact Timer */}
+                <div className="flex items-center gap-2 bg-gray-100 px-3 py-1.5 rounded-full">
+                  <Clock className="h-3 w-3 text-gray-600" />
+                  <span className="text-xs font-medium">{formatTime(timeLeft)}</span>
+                </div>
               </div>
-              <span className="ml-2 text-xs md:text-sm font-medium text-[#0000FF]">
-                Choose Room
-              </span>
-            </div>
 
-            <div className="flex items-center flex-col gap-2">
-              <div className="w-10 h-10 bg-[#0000FF] z-10 rounded-full flex items-center justify-center">
-                <span className="text-white text-sm font-medium">2</span>
+              {/* Progress Steps - Compact */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center">
+                  <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
+                    <Check className="h-3 w-3 text-white" />
+                  </div>
+                  <div className="w-6 h-0.5 bg-blue-600"></div>
+                </div>
+                <div className="flex items-center">
+                  <div className="w-6 h-6 bg-blue-600 rounded-full flex items-center justify-center">
+                    <span className="text-xs text-white">2</span>
+                  </div>
+                  <div className="w-6 h-0.5 bg-gray-300"></div>
+                </div>
+                <div className="w-6 h-6 bg-gray-200 rounded-full flex items-center justify-center">
+                  <span className="text-xs text-gray-500">3</span>
+                </div>
               </div>
-              <span className="ml-2 text-xs md:text-sm font-medium text-[#0000FF]">
-                Guest & Payment Details
-              </span>
-            </div>
 
-            <div className="flex items-center flex-col gap-2">
-              <div className="w-10 h-10 border border-[#666666] bg-[#F8F9FA] z-10 rounded-full flex items-center justify-center">
-                <span className="text-[#666666] text-sm font-semibold">3</span>
-              </div>
-              <span className="ml-2 text-xs md:text-sm font-medium text-[#666666]">
-                Booking confirmation
-              </span>
-            </div>
-          </div>
-
-          <div className="absolute left-[8%] flex items-center gap-4">
-            <Button
-              size={"icon"}
-              onClick={() => {
-                cleanupTimer();
-                router.back();
-              }}
-              className="border border-[#CCCCCC] hover:bg-white/90 bg-white"
-            >
-              <ChevronLeft className="h-4 w-4 text-[#666]" />
-            </Button>
-
-            {/* Countdown Timer Display */}
-            <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm">
-              <Clock className="h-4 w-4 text-[#666]" />
-              <div className="flex flex-col">
-                <span className="text-xs text-[#666]">Time remaining</span>
-                <span className="text-sm font-semibold text-[#333]">
-                  {formatTime(timeLeft)}
-                </span>
+              {/* Trust Badges - Compact */}
+              <div className="hidden sm:flex items-center gap-3">
+                <div className="flex items-center gap-1 text-gray-500">
+                  <Lock className="h-3 w-3" />
+                  <span className="text-xs">Secure</span>
+                </div>
+                <div className="flex items-center gap-1 text-gray-500">
+                  <ShieldCheck className="h-3 w-3" />
+                  <span className="text-xs">Protected</span>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="max-w-7xl mx-auto w-full p-4">
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-            {/* Main Content */}
-            <div className="lg:col-span-3 space-y-6">
-              <div>
-                <h1 className="text-sm md:text-base font-medium text-[#4D4D4D]">
-                  Almost done! Enter your details and complete your booking now.
-                </h1>
-              </div>
-
-              {/* Hotel Information */}
-              <div className="border-[#ccc] border rounded-lg">
-                <div className="py-6 space-y-6">
-                  <div className="flex flex-col gap-2 px-6">
-                    <h2 className="text-xl md:text-3xl font-semibold text-[#333333]">
-                      {bookingData?.room?.hotelName || "Hotel Name"}
-                    </h2>
-                    <StarRating rating={Number(bookingData?.hotel?.hotelInfo?.category) || 0} />
-                    <div className="flex items-center gap-2 text-sm text-[#666666]">
-                      <svg
-                        className="w-4 h-4"
-                        fill="currentColor"
-                        viewBox="0 0 20 20"
-                      >
-                        <path
-                          fillRule="evenodd"
-                          d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                      {bookingData?.room?.hotelAddress || "Hotel Address"}
+        <div className="max-w-7xl mx-auto p-4">
+          {/* Main Grid - 2 columns on desktop */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Left Column - Forms (2/3 width on desktop) */}
+            <div className="lg:col-span-2 space-y-4">
+              {/* Hotel Summary Card - Compact */}
+              <div className="bg-white rounded-lg border p-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h1 className="font-semibold">{bookingData?.room?.hotelName || "Hotel Name"}</h1>
+                    <div className="flex items-center gap-2 mt-1">
+                      <StarRating rating={Number(bookingData?.hotel?.hotelInfo?.category) || 0} />
+                      <span className="text-xs text-gray-500">•</span>
+                      <span className="text-xs text-gray-500">{bookingData?.room?.hotelAddress?.split(',')[0]}</span>
                     </div>
                   </div>
-
-                  <hr />
-
-                  {/* Room Details */}
-                  <div className="flex gap-4 px-6">
-                    <div className="relative w-24 h-20 rounded-lg overflow-hidden">
-                      <Image
-                        src="/placeholder.svg?height=80&width=96"
-                        alt="Room"
-                        fill
-                        className="object-cover"
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-medium text-[#333333] mb-2">
-                        {bookingData?.room?.Rooms?.[0] || "Room Type"}
-                      </h3>
-                      <div className="space-y-1 text-sm text-[#808080]">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                          {bookingData?.room?.Special || "Room Special"}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Booking Dates */}
-                  <div className="grid grid-cols-5 gap-4 text-center px-6">
-                    <div>
-                      <p className="text-xs md:text-sm font-medium text-[#333333]">
-                        {formatDate(checkInDate)}
-                      </p>
-                      <p className="text-xs text-[#808080]">Check-in</p>
-                    </div>
-                    <div>
-                      <p className="text-xs md:text-sm font-medium text-[#333333]">
-                        {formatDate(checkOutDate)}
-                      </p>
-                      <p className="text-xs text-[#808080]">Check-out</p>
-                    </div>
-                    <div>
-                      <p className="text-xs md:text-sm font-medium text-[#333333]">
-                        {pricing.nights}
-                      </p>
-                      <p className="text-xs text-[#808080]">Nights</p>
-                    </div>
-                    <div>
-                      <p className="text-xs md:text-sm font-medium text-[#333333]">
-                        {totalAdults}
-                      </p>
-                      <p className="text-xs text-[#808080]">Adult (s)</p>
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-[#333333]">{totalRooms}</p>
-                      <p className="text-xs text-[#808080]">Room (s)</p>
-                    </div>
+                  <div className="text-right">
+                    <div className="text-xs text-gray-500">Total</div>
+                    <div className="font-bold text-blue-600">{formatCurrency(pricing.total, pricing.currency)}</div>
                   </div>
                 </div>
 
-                <hr />
+                {/* Stay Details - Compact Grid */}
+                <div className="grid lg:grid-cols-5 grid-cols-3 gap-2 mt-3 text-center text-xs">
+                  <div className="bg-gray-50 p-2 rounded">
+                    <Calendar className="h-3 w-3 mx-auto text-gray-400" />
+                    <div className="font-medium mt-1">{formatDate(checkInDate)}</div>
+                    <div className="text-gray-500">Check-in</div>
+                  </div>
+                  <div className="bg-gray-50 p-2 rounded">
+                    <Calendar className="h-3 w-3 mx-auto text-gray-400" />
+                    <div className="font-medium mt-1">{formatDate(checkOutDate)}</div>
+                    <div className="text-gray-500">Check-out</div>
+                  </div>
+                  <div className="bg-gray-50 p-2 rounded">
+                    <Clock className="h-3 w-3 mx-auto text-gray-400" />
+                    <div className="font-medium mt-1">{pricing.nights}</div>
+                    <div className="text-gray-500">Nights</div>
+                  </div>
+                  <div className="bg-gray-50 p-2 rounded">
+                    <User className="h-3 w-3 mx-auto text-gray-400" />
+                    <div className="font-medium mt-1">{totalAdults}</div>
+                    <div className="text-gray-500">Adults</div>
+                  </div>
+                  <div className="bg-gray-50 p-2 rounded">
+                    <Home className="h-3 w-3 mx-auto text-gray-400" />
+                    <div className="font-medium mt-1">{totalRooms}</div>
+                    <div className="text-gray-500">Rooms</div>
+                  </div>
+                </div>
 
-                {/* Room Features and Facilities */}
-                <div className="p-6 space-y-4">
-                  <h3 className="text-lg font-medium text-[#4D4D4D] mb-4">
-                    Room Features and Facilities
-                  </h3>
-                  {bookingData?.hotel?.RoomFacilities?.length > 0 && (
-                    <FacilityList facilities={bookingData.hotel.RoomFacilities} maxFacilities={10} />
+                {/* Room Type */}
+                <div className="mt-3 text-sm">
+                  <span className="font-medium">{bookingData?.room?.Rooms?.[0] || "Room Type"}</span>
+                  {bookingData?.room?.Special && (
+                    <span className="ml-2 text-xs text-green-600">{bookingData.room.Special}</span>
                   )}
                 </div>
 
-                <hr />
+                {/* Facilities - Compact */}
+                {bookingData?.hotel?.RoomFacilities?.length > 0 && (
+                  <div className="mt-2">
+                    <FacilityList facilities={bookingData.hotel.RoomFacilities.slice(0, 5)} />
+                  </div>
+                )}
 
-                {/* Remarks */}
-                <div className="p-6 space-y-4">
-                  <h3 className="text-lg font-medium text-[#4D4D4D] mb-4">
-                    Remarks
-                  </h3>
-                  <p className="text-sm text-[#666666]">
-                    {evaluationData?.remarks ? (
-                      typeof evaluationData.remarks === 'string' ? (
-                        <span dangerouslySetInnerHTML={{ __html: evaluationData.remarks }} />
-                      ) : (
-                        <>
-                          {Object.values(evaluationData.remarks).map((item, index) => (
-                            <span key={index} dangerouslySetInnerHTML={{ __html: item as string }} />
-                          ))}
-                        </>
-                      )
-                    ) : (
-                      "No remarks"
+                {/* View Policies Button */}
+                {evaluationData?.remarks && (
+                  <button 
+                    onClick={handlePoliciesClick}
+                    className="mt-2 text-xs text-blue-600 flex items-center gap-1 hover:underline"
+                  >
+                    <FileText className="h-3 w-3" /> View cancellation policiies & remarks
+                  </button>
+                )}
+              </div>
+
+              {/* Contact Information - Compact */}
+              <div className="bg-white rounded-lg border p-4">
+                <h3 className="text-sm font-medium mb-3">Contact Information</h3>
+                <div className="space-y-3">
+                  <div>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-3 w-3" />
+                      <Input
+                        placeholder="Email address"
+                        className="pl-8 h-10 text-sm"
+                        {...register("guestLeaderEmail", {
+                          required: "Email required",
+                          pattern: {
+                            value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
+                            message: "Invalid email"
+                          }
+                        })}
+                      />
+                    </div>
+                    {errors.guestLeaderEmail && (
+                      <p className="text-red-500 text-xs mt-1">{errors.guestLeaderEmail.message}</p>
                     )}
-                  </p>
+                  </div>
+                  <div>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-3 w-3" />
+                      <Input
+                        placeholder="Phone number (optional)"
+                        className="pl-8 h-10 text-sm"
+                        {...register("guestLeaderPhone")}
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Guest Information Form */}
-              <form onSubmit={handleSubmit(onSubmit)}>
-                <div className="rounded-lg border border-[#ccc] py-6">
-                  {/* Guest Leader Email Section */}
-                  <div className="px-6 pb-6 border-b border-gray-200">
-                    <h3 className="text-lg font-medium text-[#333333] mb-4">
-                      Contact Information
-                    </h3>
-                    <div className="space-y-4">
-                      <div>
-                        <Label htmlFor="guestLeaderEmail" className="text-sm font-medium text-gray-700 mb-2 block">
-                          Guest Leader Email Address *
-                        </Label>
-                        <div className="relative">
-                          <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                          <Input
-                            id="guestLeaderEmail"
-                            type="email"
-                            placeholder="Enter email address for booking confirmation"
-                            className="pl-10 h-12"
-                            {...register("guestLeaderEmail", {
-                              required: "Email address is required",
-                              pattern: {
-                                value: /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i,
-                                message: "Invalid email address"
-                              }
-                            })}
-                          />
-                        </div>
-                        {errors.guestLeaderEmail && (
-                          <p className="text-red-500 text-xs mt-1">{errors.guestLeaderEmail.message}</p>
-                        )}
-                        <p className="text-xs text-gray-500 mt-1">
-                          We'll send your booking confirmation and updates to this email address
-                        </p>
-                      </div>
+              {/* Guest Details - Compact per room */}
+              <div className="space-y-3">
+                {roomForms.map((room, roomIndex) => (
+                  <div key={roomIndex} className="bg-white rounded-lg border p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-medium text-sm">Room {roomIndex + 1}</h4>
+                      <span className="text-xs bg-gray-100 px-2 py-1 rounded">
+                        {room.adults.length} Adult{room.adults.length > 1 ? 's' : ''}, {room.children.length} Child{room.children.length > 1 ? 'ren' : ''}
+                      </span>
                     </div>
-                  </div>
 
-                  <div className="px-6 pt-6">
-                    <h3 className="text-lg font-medium text-[#333333] mb-4">
-                      Guest Details - {totalRooms} Room(s), {totalAdults} Adult(s), {totalChildren} Child(ren)
-                    </h3>
-                    <div className="flex items-start gap-2 mb-6 p-3 rounded-lg">
-                      <Info className="w-4 h-4 text-blue-600 mt-0.5" />
-                      <p className="text-sm text-gray-700">
-                        The guest checking into each hotel room must be 21 or older, present a valid Photo ID and credit card.
-                      </p>
-                    </div>
-                  </div>
-                  <hr />
-                  
-                  {/* Room-wise Guest Forms */}
-                  {roomForms.map((room, roomIndex) => (
-                    <div key={roomIndex} className="p-6 border-b border-gray-200 last:border-b-0">
-                      {/* Room Header */}
-                      <div className="mb-6">
-                        <h4 className="text-lg font-semibold text-[#333333] mb-2">
-                          Room {roomIndex + 1}
-                        </h4>
-                        <p className="text-sm text-[#666666]">
-                          {room.adults.length} Adult(s), {room.children.length} Child(ren)
-                        </p>
-                      </div>
-
-                      {/* Adults in this Room */}
-                      {room.adults.length > 0 && (
-                        <div className="mb-6">
-                          <h5 className="text-sm font-medium text-[#808080] mb-4 tracking-widest">
-                            ADULTS
-                          </h5>
-                          <div className="space-y-4">
-                            {room.adults.map((_: any, adultIndex: number) => (
-                              <div key={adultIndex} className="p-4 border border-gray-200 rounded-lg">
-                                <h6 className="text-sm font-medium text-gray-700 mb-3">Adult {adultIndex + 1}</h6>
-                                <div className="grid md:grid-cols-12 gap-4">
-                                  <div className="col-span-2">
-                                    <Label className="text-sm font-medium text-gray-700">
-                                      Title *
-                                    </Label>
-                                    <Select 
-                                      onValueChange={(value) => setValue(`rooms.${roomIndex}.adults.${adultIndex}.title`, value)}
-                                      defaultValue="mr"
-                                    >
-                                      <SelectTrigger className="mt-1 w-full h-12">
-                                        <SelectValue placeholder="Mr." />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="mr">Mr.</SelectItem>
-                                        <SelectItem value="mrs">Mrs.</SelectItem>
-                                        <SelectItem value="ms">Ms.</SelectItem>
-                                        <SelectItem value="dr">Dr.</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                  
-                                  <div className="col-span-5">
-                                    <Label className="text-sm font-medium text-gray-700">
-                                      First name *
-                                    </Label>
-                                    <Input
-                                      placeholder="Enter first name"
-                                      className="mt-1 h-12"
-                                      {...register(`rooms.${roomIndex}.adults.${adultIndex}.firstName`, { 
-                                        required: "First name is required",
-                                        minLength: { value: 2, message: "First name must be at least 2 characters" }
-                                      })}
-                                    />
-                                  </div>
-                                  
-                                  <div className="col-span-5">
-                                    <Label className="text-sm font-medium text-gray-700">
-                                      Last name *
-                                    </Label>
-                                    <Input
-                                      placeholder="Enter last name"
-                                      className="mt-1 h-12"
-                                      {...register(`rooms.${roomIndex}.adults.${adultIndex}.lastName`, { 
-                                        required: "Last name is required",
-                                        minLength: { value: 2, message: "Last name must be at least 2 characters" }
-                                      })}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
+                    {/* Adults */}
+                    {room.adults.map((_: any, adultIndex: number) => (
+                      <div key={adultIndex} className="mb-3 pb-3 border-b last:border-0 last:pb-0">
+                        <p className="text-xs text-gray-500 mb-2">Adult {adultIndex + 1}</p>
+                        <div className="grid lg:grid-cols-5 gap-2">
+                          <div>
+                            <Select 
+                              onValueChange={(value) => setValue(`rooms.${roomIndex}.adults.${adultIndex}.title`, value)}
+                              defaultValue="mr"
+                            >
+                              <SelectTrigger className="h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="mr">Mr.</SelectItem>
+                                <SelectItem value="mrs">Mrs.</SelectItem>
+                                <SelectItem value="ms">Ms.</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Input
+                              placeholder="First name"
+                              className="h-9 text-sm"
+                              {...register(`rooms.${roomIndex}.adults.${adultIndex}.firstName`, { 
+                                required: "Required"
+                              })}
+                            />
+                          </div>
+                          <div>
+                            <Input
+                              placeholder="Last name"
+                              className="h-9 text-sm"
+                              {...register(`rooms.${roomIndex}.adults.${adultIndex}.lastName`, { 
+                                required: "Required"
+                              })}
+                            />
                           </div>
                         </div>
-                      )}
+                      </div>
+                    ))}
 
-                      {/* Children in this Room */}
-                      {room.children.length > 0 && (
-                        <div>
-                          <h5 className="text-sm font-medium text-[#808080] mb-4 tracking-widest">
-                            CHILDREN
-                          </h5>
-                          <div className="space-y-4">
-                            {room.children.map((child: any, childIndex: number) => (
-                              <div key={childIndex} className="p-4 border border-gray-200 rounded-lg">
-                                <h6 className="text-sm font-medium text-gray-700 mb-3">
-                                  Child {childIndex + 1} {child.age && `- Age: ${child.age}`}
-                                </h6>
-                                <div className="grid md:grid-cols-12 gap-4">
-                                  <div className="col-span-2">
-                                    <Label className="text-sm font-medium text-gray-700">
-                                      Title
-                                    </Label>
-                                    <Select 
-                                      onValueChange={(value) => setValue(`rooms.${roomIndex}.children.${childIndex}.title`, value)}
-                                      defaultValue="child"
-                                    >
-                                      <SelectTrigger className="mt-1 w-full h-12">
-                                        <SelectValue placeholder="Child" />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        <SelectItem value="child">Child</SelectItem>
-                                        <SelectItem value="master">Master</SelectItem>
-                                        <SelectItem value="miss">Miss</SelectItem>
-                                      </SelectContent>
-                                    </Select>
-                                  </div>
-                                  
-                                  <div className="col-span-3">
-                                    <Label className="text-sm font-medium text-gray-700">
-                                      First name *
-                                    </Label>
-                                    <Input
-                                      placeholder="Enter first name"
-                                      className="mt-1 h-12"
-                                      {...register(`rooms.${roomIndex}.children.${childIndex}.firstName`, { 
-                                        required: "First name is required",
-                                        minLength: { value: 2, message: "First name must be at least 2 characters" }
-                                      })}
-                                    />
-                                  </div>
-                                  
-                                  <div className="col-span-3">
-                                    <Label className="text-sm font-medium text-gray-700">
-                                      Last name *
-                                    </Label>
-                                    <Input
-                                      placeholder="Enter last name"
-                                      className="mt-1 h-12"
-                                      {...register(`rooms.${roomIndex}.children.${childIndex}.lastName`, { 
-                                        required: "Last name is required",
-                                        minLength: { value: 2, message: "Last name must be at least 2 characters" }
-                                      })}
-                                    />
-                                  </div>
-                                  
-                                  <div className="col-span-4">
-                                    <Label className="text-sm font-medium text-gray-700">
-                                      Age *
-                                    </Label>
-                                    <Input
-                                      value={child.age}
-                                      disabled
-                                      className="mt-1 h-12 bg-gray-100"
-                                      placeholder="Age (auto-filled)"
-                                      {...register(`rooms.${roomIndex}.children.${childIndex}.age`)}
-                                    />
-                                    <p className="text-xs text-gray-500 mt-1">
-                                      Age is pre-filled from your selection and cannot be changed
-                                    </p>
-                                  </div>
-                                </div>
-                              </div>
-                            ))}
+                    {/* Children */}
+                    {room.children.map((child: any, childIndex: number) => (
+                      <div key={childIndex} className="mb-3 last:mb-0">
+                        <p className="text-xs text-gray-500 mb-2">Child {childIndex + 1} (Age: {child.age})</p>
+                        <div className="grid lg:grid-cols-5 gap-2">
+                          <div>
+                            <Select 
+                              onValueChange={(value) => setValue(`rooms.${roomIndex}.children.${childIndex}.title`, value)}
+                              defaultValue="child"
+                            >
+                              <SelectTrigger className="h-9 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="child">Child</SelectItem>
+                                <SelectItem value="master">Master</SelectItem>
+                                <SelectItem value="miss">Miss</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div>
+                            <Input
+                              placeholder="First name"
+                              className="h-9 text-sm"
+                              {...register(`rooms.${roomIndex}.children.${childIndex}.firstName`, { 
+                                required: "Required"
+                              })}
+                            />
+                          </div>
+                          <div>
+                            <Input
+                              placeholder="Last name"
+                              className="h-9 text-sm"
+                              {...register(`rooms.${roomIndex}.children.${childIndex}.lastName`, { 
+                                required: "Required"
+                              })}
+                            />
                           </div>
                         </div>
-                      )}
-                    </div>
-                  ))}
-                  
-                  <hr />
-
-                  {/* Options Section */}
-                  <div className="p-6">
-                    <h4 className="text-sm font-medium text-[#808080] mb-4 tracking-widest">
-                      OPTIONS
-                    </h4>
-                    <div className="space-y-4">
-                      <div className="flex md:items-center flex-col md:flex-row gap-4">
-                        <span className="text-sm text-gray-700">
-                          Please note late arrival at:
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            placeholder="00"
-                            className="w-16 text-center"
-                            {...register("options.lateArrivalHours")}
-                          />
-                          <span className="text-sm text-[#808080]">Hours</span>
-                          <Input
-                            placeholder="00"
-                            className="w-16 text-center"
-                            {...register("options.lateArrivalMinutes")}
-                          />
-                          <span className="text-sm text-[#808080]">Minutes</span>
-                        </div>
                       </div>
-
-                     <div className="space-y-3">
-                      {[
-                        { id: "connecting", label: "If possible, provide connecting rooms", name: "connectingRooms" },
-                        { id: "adjoining", label: "If possible, provide adjacent rooms", name: "adjoiningRooms" },
-                        { id: "nonsmoking", label: "If possible, provide non-smoking room", name: "nonSmoking" },
-                        { id: "honeymoon", label: "Kindly request special treatment as the booking is for Honeymooners", name: "honeymoon" },
-                        { id: "extrabed", label: "Request for an extra bed", name: "extraBed" }
-                      ].map((option) => (
-                        <div key={option.id} className="flex items-center gap-4">
-                          <Checkbox
-                            id={option.id}
-                            checked={watch(`options.${option.name}` as any) || false}
-                            onCheckedChange={(checked) => {
-                              setValue(`options.${option.name}` as any, checked === true, { shouldValidate: true });
-                            }}
-                          />
-                          <Label
-                            htmlFor={option.id}
-                            className="text-sm text-gray-700"
-                          >
-                            {option.label}
-                          </Label>
-                        </div>
-                      ))}
-                    </div>
-                    </div>
+                    ))}
                   </div>
+                ))}
+              </div>
 
-                  {/* Notes */}
-                  <div className="mt-6 p-6">
-                    <Label htmlFor="notes" className="text-sm font-medium text-gray-700">
-                      Note (Optional)
-                    </Label>
-                    <Textarea
-                      id="notes"
-                      placeholder="Write some notes for your reservation"
-                      className="mt-1 min-h-[80px]"
-                      {...register("notes")}
-                    />
-                  </div>
+              {/* Options & Notes - Compact */}
+              <div className="bg-white rounded-lg border p-4">
+                <h3 className="text-sm font-medium mb-3">Special Requests</h3>
+                
+                {/* Late Arrival */}
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xs text-gray-600">Late arrival:</span>
+                  <Input type="number" placeholder="HH" className="w-12 h-8 text-center text-sm" {...register("options.lateArrivalHours")} />
+                  <span className="text-xs">:</span>
+                  <Input type="number" placeholder="MM" className="w-12 h-8 text-center text-sm" {...register("options.lateArrivalMinutes")} />
                 </div>
 
-                {/* Payment Section - Only Paystack */}
-                <div className="border border-[#ccc] rounded-lg p-6 mt-6">
-                 
-                  <div className="mt-8 space-y-4">
-                    <div className="flex items-center justify-center gap-2">
-                      <Checkbox 
-                        id="terms"
-                        {...register("terms", { required: "You must agree to the terms and conditions" })}
-                        checked={watch("terms") || false}
+                {/* Options Grid */}
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {[
+                    { id: "connecting", label: "Connecting rooms", name: "connectingRooms" },
+                    { id: "adjoining", label: "Adjacent rooms", name: "adjoiningRooms" },
+                    { id: "nonsmoking", label: "Non-smoking", name: "nonSmoking" },
+                    { id: "honeymoon", label: "Honeymoon setup", name: "honeymoon" },
+                    { id: "extrabed", label: "Extra bed", name: "extraBed" }
+                  ].map((option) => (
+                    <div key={option.id} className="flex items-center gap-2">
+                      <Checkbox
+                        id={option.id}
+                        checked={watch(`options.${option.name}` as any) || false}
                         onCheckedChange={(checked) => {
-                          setValue("terms", checked === true, { shouldValidate: true });
+                          setValue(`options.${option.name}` as any, checked === true);
                         }}
                       />
-                      <Label htmlFor="terms" className="text-sm text-[#808080] text-center">
-                        I agree to the{" "}
-                        <button type="button" className="text-[#FC5D01] hover:text-orange-600 underline">
-                          Terms & Conditions
-                        </button>{" "}
-                        and{" "}
-                        <button type="button" className="text-[#FC5D01] hover:text-orange-600 underline">
-                          Privacy Policy
-                        </button>
+                      <Label htmlFor={option.id} className="text-xs text-gray-700">
+                        {option.label}
                       </Label>
                     </div>
-                    {errors.terms && (
-                      <p className="text-red-500 text-xs text-center">{errors.terms.message}</p>
-                    )}
-
-                    {/* Payment Button */}
-                    {!showPaystackButton ? (
-                    <Button 
-                      type="button"
-                      disabled={isSubmitting || loading || isProcessingPayment || isInitializingPayment}
-                      className="w-full bg-[#0000FF] hover:bg-blue-700 text-white py-6 text-sm font-medium disabled:bg-blue-400"
-                      onClick={handlePaystackInitiation}
-                    >
-                      {isInitializingPayment || isProcessingPayment ? (
-                        <>
-                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                          Processing...
-                        </>
-                      ) : (
-                        "Proceed to Payment"
-                      )}
-                    </Button>
-                  ) : (
-                    <div className="relative">
-                      <PaystackButton 
-                        {...paystackComponentProps}
-                        text={isProcessingPayment ? "Processing..." : "Pay with Paystack"}
-                      />
-                      {(isProcessingPayment || isInitializingPayment) && (
-                        <div className="absolute inset-0 bg-white bg-opacity-75 flex items-center justify-center rounded-lg">
-                          <div className="flex flex-col items-center gap-2">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
-                            <span className="text-sm text-gray-700">Processing payment...</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                    {/* Payment Security Notice */}
-                    <div className="flex items-center justify-center gap-2 text-xs text-green-600 mt-2">
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>Your payment is secure and encrypted</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
-              </form>
+
+                {/* Notes */}
+                <Textarea
+                  placeholder="Additional notes (optional)"
+                  className="text-sm h-16"
+                  {...register("notes")}
+                />
+              </div>
             </div>
 
-            {/* Pricing Sidebar */}
-            <div className="lg:col-span-2">
-              <div className="bg-white max-w-sm mx-auto sticky top-6">
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-sm text-[#666666] py-2 rounded-lg">
-                    <Info className="w-4 h-4" />
-                    You are on your way to getting a great deal!
+            {/* Right Column - Pricing & Payment (1/3 width on desktop) */}
+            <div className="space-y-4">
+              <div className="bg-white rounded-lg border p-4 sticky top-20">
+                <h3 className="font-medium text-sm mb-3">Price Summary</h3>
+                
+                {/* Quick Price Breakdown */}
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Subtotal</span>
+                    <span>{formatCurrency(pricing.subtotal, pricing.currency)}</span>
                   </div>
-
-                  {/* Price Breakdown Details */}
-                  {breakdownData?.success && breakdownData.rooms && (
-                    <div className="space-y-4">
-                      <h4 className="text-sm font-medium text-[#333333]">Room Breakdown:</h4>
-                      {breakdownData.rooms.map((room, roomIndex) => (
-                        <div key={roomIndex} className="border border-gray-200 rounded-lg p-3">
-                          <div className="flex justify-between items-start mb-2">
-                            <span className="text-sm font-medium text-[#333333]">
-                              Room {roomIndex + 1}
-                            </span>
-                            <span className="text-sm font-medium">
-                              {formatCurrency(calculateRoomTotal(room), pricing.currency)}
-                            </span>
-                          </div>
-                          <p className="text-xs text-[#666666] mb-2">
-                            {room.room_type} • {room.children} child(ren)
-                          </p>
-                          
-                          {/* Individual price breakdown for this room */}
-                          <div className="space-y-1 text-xs">
-                            {room.price_breakdown.map((breakdown, breakdownIndex) => {
-                                const fromDate = new Date(breakdown.from_date);
-                                const toDate = new Date(breakdown.to_date);
-                                const diffDays = Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60 * 24));
-                                const displayPrice = diffDays > 1 ? breakdown.price * nights : breakdown.price;
-                                
-                                return (
-                                  <div key={breakdownIndex} className="flex justify-between text-[#666666]">
-                                    <span>
-                                      {formatDate(breakdown.from_date)} - {formatDate(breakdown.to_date)}
-                                    </span>
-                                    <span>{formatCurrency(displayPrice, breakdown.currency)}</span>
-                                  </div>
-                                );
-                              })}
-                          </div>
-                        </div>
-                      ))}
-                      <hr className="border-gray-200" />
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Taxes & fees</span>
+                    <span>{formatCurrency(pricing.taxes, pricing.currency)}</span>
+                  </div>
+                  <div className="border-t pt-2 mt-2">
+                    <div className="flex justify-between font-bold">
+                      <span>Total</span>
+                      <span className="text-blue-600">{formatCurrency(pricing.total, pricing.currency)}</span>
                     </div>
-                  )}
+                    <p className="text-xs text-gray-500 mt-1 text-right">Includes all taxes</p>
+                  </div>
+                </div>
 
-                  <div className="flex justify-between text-sm">
-                    <span className="text-[#808080]">Price per night(Average)</span>
-                    <span className="font-medium">
-                      {breakdownData?.success && breakdownData?.rooms.length > 0
-                        ? formatCurrency(pricing.subtotal / pricing.nights, pricing.currency)
-                        : `$${(Number(bookingData?.room?.TotalPrice) / nights).toFixed(2)}`
-                      }
-                    </span>
+                {/* Per night breakdown if available */}
+                {breakdownData?.rooms && (
+                  <div className="mt-3 pt-3 border-t">
+                    <p className="text-xs text-gray-500 mb-2">Nightly breakdown</p>
+                    {breakdownData.rooms[0]?.price_breakdown.map((bd, i) => (
+                      <div key={i} className="flex justify-between text-xs text-gray-600">
+                        <span>{formatDate(bd.from_date)}</span>
+                        <span>{formatCurrency(bd.price, bd.currency)}</span>
+                      </div>
+                    ))}
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-[#666666]">Adult (s)</span>
-                    <span className="font-medium">{totalAdults}</span>
+                )}
+
+                {/* Terms Checkbox */}
+                <div className="mt-4">
+                  <div className="flex items-start gap-2">
+                    <Checkbox 
+                      id="terms"
+                      {...register("terms", { required: "You must agree to continue" })}
+                      className="mt-0.5"
+                    />
+                    <Label htmlFor="terms" className="text-xs text-gray-600">
+                      I agree to the <button type="button" onClick={handlePoliciesClick} className="text-blue-600 hover:underline">Terms</button> and <button type="button" onClick={handlePoliciesClick} className="text-blue-600 hover:underline">Privacy Policy</button>
+                    </Label>
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-[#666666]">Children</span>
-                    <span className="font-medium">{totalChildren}</span>
+                  {errors.terms && (
+                    <p className="text-red-500 text-xs mt-1">{errors.terms.message}</p>
+                  )}
+                </div>
+
+                {/* Payment Button */}
+                {!showPaystackButton ? (
+                  <Button 
+                    type="button"
+                    disabled={isSubmitting || loading || isProcessingPayment || isInitializingPayment}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white mt-3 h-10 text-sm"
+                    onClick={handlePaystackInitiation}
+                  >
+                    {isInitializingPayment || isProcessingPayment ? (
+                      <div className="flex items-center gap-2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                        <span>Processing...</span>
+                      </div>
+                    ) : (
+                      "Proceed to Payment"
+                    )}
+                  </Button>
+                ) : (
+                  <div className="relative mt-3">
+                    <PaystackButton 
+                      {...paystackComponentProps}
+                      text="Pay with Paystack"
+                    />
                   </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-[#666666]">Number of nights</span>
-                    <span className="font-medium">{pricing.nights || nights}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                      <span className="text-[#666666]">Number of rooms</span>
-                      <span className="font-medium">{breakdownData?.total_rooms || totalRooms}</span>
-                  </div>
-                  <hr className="border-gray-200" />
-                  {/* Subtotal (Sum of all room breakdowns) */}
-                  <div className="flex justify-between text-sm">
-                      <span className="text-[#666666]">Subtotal</span>
-                      <span className="font-medium">
-                        {formatCurrency(pricing.subtotal, pricing.currency)}
-                      </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-[#666666]">Taxes and fees</span>
-                    <span className="font-medium">
-                      {breakdownData?.success && breakdownData?.rooms.length > 0 
-                        ? formatCurrency(pricing.taxes, pricing.currency)
-                        : "$0.00"
-                      }
-                    </span>
-                  </div>
-                  <hr className="border-gray-200" />
-                  {/* Total (Subtotal + Taxes) */}
-                  <div className="flex justify-between text-lg font-semibold">
-                    <span>Total Charges</span>
-                    <span>
-                      {formatCurrency(pricing.total, pricing.currency)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-[#808080] text-center">
-                    Prices include all taxes and fees
+                )}
+
+                {/* Security Notice */}
+                <div className="flex items-center justify-center gap-1 mt-3 text-green-600 text-xs">
+                  <ShieldCheck className="h-3 w-3" />
+                  <span>Secure payment</span>
+                </div>
+              </div>
+
+              {/* Cancellation Info */}
+              <div className="bg-blue-50 rounded-lg border border-blue-100 p-3">
+                <div className="flex items-start gap-2">
+                  <Info className="h-4 w-4 text-blue-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-blue-700">
+                    {cancellationPolicy ? (
+                      <>
+                        Free cancellation before {formatDate(cancellationPolicy.startingDate)}. 
+                        <button onClick={handlePoliciesClick} className="underline ml-1 font-medium">
+                          See full policy
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        Cancellation policy applies. 
+                        <button onClick={handlePoliciesClick} className="underline ml-1 font-medium">
+                          View details
+                        </button>
+                      </>
+                    )}
                   </p>
                 </div>
               </div>
@@ -1389,26 +1202,85 @@ export function BookingDetails() {
         </div>
       </div>
 
-      {/* Timeout Modal */}
-      {showTimeoutModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <div className="flex items-center gap-3 mb-4">
-              <AlertTriangle className="h-6 w-6 text-red-600" />
-              <h3 className="text-lg font-semibold text-red-600">Booking Session Expired</h3>
-            </div>
-            <p className="text-gray-700 mb-4">
-              Your 30-minute booking session has ended. This ensures room availability for all guests. 
-              Please start over to continue with your booking.
-            </p>
-            <div className="flex justify-end">
-              <Button
-                onClick={handleTimeoutRedirect}
-                className="bg-[#0000FF] hover:bg-blue-700"
-              >
-                Return to Hotel Search
+      {/* Hotel Policies Dialog - Built directly on the page */}
+      {isPoliciesDialogOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b p-4 flex items-center justify-between">
+              <h2 className="font-semibold">Hotel Policies & Information</h2>
+              <Button variant="ghost" size="icon" onClick={() => setIsPoliciesDialogOpen(false)} className="h-8 w-8">
+                <X className="h-4 w-4" />
               </Button>
             </div>
+            
+            <div className="p-4 space-y-6">
+              {/* Cancellation Policy Section */}
+              {cancellationPolicy && (
+                <div className="space-y-2">
+                  <h3 className="font-medium text-sm text-red-600 flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    Cancellation Policy
+                  </h3>
+                  <div className="bg-red-50 border border-red-100 rounded-lg p-3">
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span className="text-gray-600">Valid from:</span>
+                        <p className="font-medium">{cancellationPolicy.startingDate}</p>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Penalty:</span>
+                        <p className="font-medium text-red-600">{cancellationPolicy.penaltyPercentage}% of booking price</p>
+                      </div>
+                    </div>
+                    {cancellationPolicy.additionalInfo && (
+                      <p className="text-sm text-gray-700 mt-2 pt-2 border-t border-red-100">
+                        {cancellationPolicy.additionalInfo}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Other Remarks */}
+              {otherRemarks.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="font-medium text-sm">Hotel Policies & Information</h3>
+                  <div className="space-y-3">
+                    {otherRemarks.map((remark, index) => renderRemark(remark, index))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="sticky bottom-0 bg-gray-50 border-t p-4">
+              <Button 
+                onClick={() => setIsPoliciesDialogOpen(false)} 
+                className="w-full bg-blue-600 hover:bg-blue-700"
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Timeout Modal */}
+      {showTimeoutModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-5 max-w-sm w-full">
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle className="h-5 w-5 text-red-600" />
+              <h3 className="font-semibold">Session Expired</h3>
+            </div>
+            <p className="text-sm text-gray-600 mb-4">
+              Your 30-minute booking session has ended. Please start over.
+            </p>
+            <Button
+              onClick={handleTimeoutRedirect}
+              className="w-full bg-blue-600 hover:bg-blue-700 h-9 text-sm"
+            >
+              Return to Search
+            </Button>
           </div>
         </div>
       )}

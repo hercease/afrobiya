@@ -186,7 +186,7 @@ const HotelSearchForm: React.FC<HotelSearchFormProps> = ({
     formData.append("page", params.get("page") || "1");
     formData.append("roomBasis", params.get("roomBasis") || "");
     formData.append("starLevels", params.get("starLevels") || "");
-    formData.append("minPrice", params.get("minPrice") || "");
+    formData.append("minPrice", params.get("minPrice") || "0");
     formData.append("maxPrice", params.get("maxPrice") || "");
 
     for (let i = 1; i <= Number.parseInt(params.get("totalRooms") || "1"); i++ ) {

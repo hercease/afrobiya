@@ -425,7 +425,6 @@ const HotelResults = ({ loading, results }: { loading?: boolean; results: any })
                           <div className="text-sm lg:text-1xl font-medium text-[#0000FF]">
                             {hotel['Offers'][0]?.Currency}{Number(hotel['Offers'][0]?.TotalPrice).toFixed(2)}
                           </div>
-                          <div className="text-xs text-[#808080]">Per night</div>
                         </div>
                         <div className="text-xs text-center text-[#808080] lg:mt-auto">
                           Includes
@@ -444,91 +443,92 @@ const HotelResults = ({ loading, results }: { loading?: boolean; results: any })
                         : "max-h-0 opacity-0"
                     }`}
                   >
-                    {hotel['Offers'] as unknown[] && (
-                      <>
-                        <div className="py-4">
-                          <div className="space-y-3 w-full">
-                            {hotel['Offers']?.map((room: any, index: number) => (
-                              <div
-                                key={index}
-                                className='bg-white flex flex-col md:px-8 border-t p-4 lg:flex-row gap-4 transform transition-all duration-300 ease-out cursor-pointer translate-y-0 opacity-100'
-                                style={{
-                                  transitionDelay: `${index * 100}ms`
-                                }}
-                              >
-                                <div className="flex flex-col lg:flex-row gap-4 w-full">
-                                  <div className="relative w-full lg:w-48 h-48 flex-shrink-0">
-                                    <Image
-                                      src={"/placeholder.svg"}
-                                      alt={"Hotel Image"}
-                                      width={192}
-                                      height={192}
-                                      className="object-cover w-full h-full lg:rounded-lg"
-                                    />
+                    {hotel['Offers']?.map((room: any, index: number) => (
+                      <div
+                        key={index}
+                        className='bg-white flex flex-col md:px-8 border-t p-4 lg:flex-row gap-4 transform transition-all duration-300 ease-out cursor-pointer translate-y-0 opacity-100'
+                        style={{
+                          transitionDelay: `${index * 100}ms`
+                        }}
+                      >
+                        <div className="flex flex-col lg:flex-row gap-4 w-full">
+                          
+                          <div className="flex-1 flex flex-col lg:flex-row justify-between">
+                            <div className="flex justify-between flex-col gap-4 py-1 px-4 flex-1">
+                              <div className="space-y-2">
+                                {/* UPDATED: Use formatted room display */}
+                                <h3 className="text-lg lg:text-xl font-semibold">
+                                  {formatRoomDisplay(room.Rooms || [])}
+                                </h3>
+
+                                {/* COMPACT CANCELLATION & AVAILABILITY SECTION */}
+                                <div className="flex flex-wrap items-center gap-3 mt-1 text-xs">
+                                  {/* Cancellation Deadline Badge */}
+                                  <div className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-md border border-gray-200">
+                                    <span className="text-gray-500">📅</span>
+                                    <span className="font-medium text-gray-700">Cancel by:</span>
+                                    <span className="text-gray-900 font-semibold">{room.CxlDeadLine}</span>
                                   </div>
                                   
-                                  <div className="flex-1 flex flex-col lg:flex-row justify-between">
-                                    <div className="flex justify-between flex-col gap-4 py-1 px-4 flex-1">
-                                      <div className="space-y-2">
-                                        {/* UPDATED: Use formatted room display */}
-                                        <h3 className="text-lg lg:text-xl font-semibold">
-                                          {formatRoomDisplay(room.Rooms || [])}
-                                        </h3>
-
-                                        {hotel.RoomFacilities?.length > 0 && (
-                                          <FacilityList facilities={hotel.RoomFacilities} maxFacilities={5} />
-                                        )}
-                                      </div>
-
-                                      <div className="flex flex-wrap gap-2 lg:gap-4 items-center text-[#808080]">
-                                        <Button
-                                          variant="link"
-                                          className="p-0 h-auto text-xs tracking-widest text-orange-600"
-                                          onClick={() =>
-                                            handleRoomInfoClick(room, hotel.RoomFacilities || [])
-                                          }
-                                        >
-                                          Room Info
-                                        </Button>
-                                      </div>
-                                    </div>
-
-                                    <div className="text-center flex flex-row lg:flex-col border-t lg:border-t-0 p-4 justify-between lg:justify-between lg:w-32">
-                                      <div className="flex flex-col gap-1">
-                                        <div className="text-sm font-medium text-[#0000FF]">
-                                          {room.Currency}{room.TotalPrice}
-                                        </div>
-                                        <div className="text-xs text-[#808080]">
-                                          Per night
-                                        </div>
-                                      </div>
-                                      <div className="lg:mt-2">
-                                        <Button
-                                          size={"sm"}
-                                          className="bg-[#0000FF] w-[74px] p-2"
-                                          onClick={() => handleBookClick(hotel, room)}
-                                        >
-                                          {isCurrentlyCached(hotel.HotelCode, room.HotelSearchCode) ? 'Booked' : 'Book'}
-                                        </Button>
-                                      </div>
-                                    </div>
+                                  {/* Availability Badge */}
+                                  <div className="flex items-center gap-1 bg-gray-50 px-2 py-1 rounded-md border border-gray-200">
+                                    <span className="text-gray-500">🛏️</span>
+                                    <span className="font-medium text-gray-700">Available:</span>
+                                    <span className={`font-semibold ${
+                                      room.Availability > 2 ? 'text-green-600' : 
+                                      room.Availability > 0 ? 'text-orange-500' : 'text-red-500'
+                                    }`}>
+                                      {room.Availability} {room.Availability === 1 ? 'room' : 'rooms'}
+                                    </span>
                                   </div>
+
+                                  {/* Non-Refundable Indicator (if applicable) */}
+                                  {room.NonRef && (
+                                    <div className="flex items-center gap-1 bg-red-50 px-2 py-1 rounded-md border border-red-200">
+                                      <span className="text-red-500">⚠️</span>
+                                      <span className="text-red-600 font-medium text-xs">Non-refundable</span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {hotel.RoomFacilities?.length > 0 && (
+                                  <FacilityList facilities={hotel.RoomFacilities} maxFacilities={5} />
+                                )}
+                              </div>
+
+                              <div className="flex flex-wrap gap-2 lg:gap-4 items-center text-[#808080]">
+                                <Button
+                                  variant="link"
+                                  className="p-0 h-auto text-xs tracking-widest text-orange-600"
+                                  onClick={() =>
+                                    handleRoomInfoClick(room, hotel.RoomFacilities || [])
+                                  }
+                                >
+                                  Room Info
+                                </Button>
+                              </div>
+                            </div>
+
+                            <div className="text-center flex flex-row lg:flex-col border-t lg:border-t-0 p-4 justify-between lg:justify-between lg:w-32">
+                              <div className="flex flex-col gap-1">
+                                <div className="text-sm font-medium text-[#0000FF]">
+                                  {room.Currency}{room.TotalPrice}
                                 </div>
                               </div>
-                            ))}
-
-                            <div className="p-4">
-                              <Button
-                                onClick={() => handleShowRoomsClick(hotel.HotelCode)}
-                                className="w-full hover:bg-white border-2 bg-transparent text-[#888] border-[#ccc]"
-                              >
-                                Close Rooms <ChevronUp className="mr-2 h-4 w-4" />
-                              </Button>
+                              <div className="lg:mt-2">
+                                <Button
+                                  size={"sm"}
+                                  className="bg-[#0000FF] w-[74px] p-2"
+                                  onClick={() => handleBookClick(hotel, room)}
+                                >
+                                  {isCurrentlyCached(hotel.HotelCode, room.HotelSearchCode) ? 'Booked' : 'Book'}
+                                </Button>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </>
-                    )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}

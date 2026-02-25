@@ -68,7 +68,7 @@ export function Footer() {
             <div className="grid grid-cols-2 md:grid-cols-6 gap-8">
               {/* Logo */}
               <div className="col-span-2 md:col-span-1">
-                <Image src={"/logo.png"} alt="logo" width={196} height={100} />
+                <Image src={"/logo.png"} alt="logo" width={100} height={20} />
                 <p className="text-sm text-white">
                   Your gateway to extraordinary adventures
                 </p>

@@ -8,13 +8,34 @@ import {
   Lock,
   Clock,
   ShieldCheck,
+  Calendar,
+  User,
+  Home,
+  Moon,
+  Sun,
+  CreditCard,
+  ChevronLeft,
+  FileText,
+  Mail,
+  Phone,
+  AlertCircle,
+  Coffee,
+  DollarSign,
+  Users,
+  Dog,
+  Baby,
+  Key,
+  Clock3,
+  Luggage,
+  Utensils,
+  Wifi,
+  Car,
+  Droplets
 } from "lucide-react";
 import React, { useState, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import Link from "next/link";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 // Type definitions
 interface Guest {
@@ -80,19 +101,163 @@ interface BookingData {
   summary: Summary;
 }
 
+// ==================== REMARK HELPER FUNCTIONS ====================
+
+interface RemarkSection {
+  type: string;
+  title: string;
+  icon: React.ReactNode;
+  items: string[];
+}
+
+const decodeHtmlEntities = (text: string): string => {
+  if (!text) return text;
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = text;
+  return textarea.value;
+};
+
+const parseRemarks = (remarks: string): RemarkSection[] => {
+  if (!remarks) return [];
+  
+  // Decode HTML entities first
+  const decoded = decodeHtmlEntities(remarks);
+  
+  // Split by common delimiters
+  const sections = decoded.split(/<br\s*\/?>|\n|<li>|<\/li>|<ul>|<\/ul>|<p>|<\/p>/i).filter(s => s.trim());
+  
+  const parsedSections: RemarkSection[] = [];
+  let currentSection: { type: string; items: string[] } | null = null;
+  
+  // Define section types with their patterns
+  const sectionPatterns = [
+    { type: 'checkin', patterns: ['checkin', 'check-in', 'arrival'], icon: <Key className="h-4 w-4 text-blue-500" />, title: 'Check-in Information' },
+    { type: 'checkout', patterns: ['checkout', 'check-out', 'departure'], icon: <Luggage className="h-4 w-4 text-orange-500" />, title: 'Check-out Information' },
+    { type: 'fees', patterns: ['fee', 'charge', 'deposit', 'tax', 'cost'], icon: <DollarSign className="h-4 w-4 text-purple-500" />, title: 'Fees & Charges' },
+    { type: 'payment', patterns: ['card', 'payment', 'cash', 'credit', 'debit'], icon: <CreditCard className="h-4 w-4 text-green-500" />, title: 'Payment Information' },
+    { type: 'pets', patterns: ['pet', 'animal', 'dog', 'cat'], icon: <Dog className="h-4 w-4 text-amber-500" />, title: 'Pet Policy' },
+    { type: 'age', patterns: ['minimum', 'age', 'years'], icon: <Baby className="h-4 w-4 text-indigo-500" />, title: 'Age Requirements' },
+    { type: 'hours', patterns: ['hour', 'time', 'open', 'close'], icon: <Clock3 className="h-4 w-4 text-cyan-500" />, title: 'Operating Hours' },
+    { type: 'dining', patterns: ['breakfast', 'lunch', 'dinner', 'meal', 'restaurant'], icon: <Utensils className="h-4 w-4 text-rose-500" />, title: 'Dining Information' },
+    { type: 'amenities', patterns: ['wifi', 'internet', 'parking', 'pool', 'spa', 'gym'], icon: <Wifi className="h-4 w-4 text-teal-500" />, title: 'Amenities' },
+    { type: 'transport', patterns: ['shuttle', 'transport', 'airport', 'taxi'], icon: <Car className="h-4 w-4 text-slate-500" />, title: 'Transportation' },
+  ];
+
+  for (const section of sections) {
+    const cleanSection = section.replace(/<[^>]+>/g, '').trim();
+    if (!cleanSection || cleanSection.length < 3) continue;
+    
+    // Determine section type
+    let detectedType = 'general';
+    const lowerSection = cleanSection.toLowerCase();
+    
+    for (const pattern of sectionPatterns) {
+      if (pattern.patterns.some(p => lowerSection.includes(p))) {
+        detectedType = pattern.type;
+        break;
+      }
+    }
+    
+    // If it's the same as current section, add to it
+    if (currentSection?.type === detectedType) {
+      currentSection.items.push(cleanSection);
+    } else {
+      // Save previous section
+      if (currentSection) {
+        const pattern = sectionPatterns.find(p => p.type === currentSection?.type) || 
+          { type: 'general', icon: <FileText className="h-4 w-4 text-gray-400" />, title: 'Additional Information' };
+        
+        parsedSections.push({
+          type: currentSection.type,
+          title: pattern.title,
+          icon: pattern.icon,
+          items: currentSection.items
+        });
+      }
+      
+      // Start new section
+      currentSection = { type: detectedType, items: [cleanSection] };
+    }
+  }
+  
+  // Add the last section
+  if (currentSection) {
+    const pattern = sectionPatterns.find(p => p.type === currentSection.type) || 
+      { type: 'general', icon: <FileText className="h-4 w-4 text-gray-400" />, title: 'Additional Information' };
+    
+    parsedSections.push({
+      type: currentSection.type,
+      title: pattern.title,
+      icon: pattern.icon,
+      items: currentSection.items
+    });
+  }
+  
+  return parsedSections;
+};
+
+const extractStructuredInfo = (remarks: string) => {
+  if (!remarks) return null;
+  
+  const decoded = decodeHtmlEntities(remarks);
+  const info: Record<string, any> = {};
+  
+  // Extract check-in/out times
+  const checkInMatch = decoded.match(/CheckIn Time-Begin:?\s*([^<\n]+)/i);
+  const checkInEndMatch = decoded.match(/CheckIn Time-End:?\s*([^<\n]+)/i);
+  const checkOutMatch = decoded.match(/CheckOut Time:?\s*([^<\n]+)/i);
+  
+  if (checkInMatch || checkInEndMatch || checkOutMatch) {
+    info.timing = {
+      checkIn: checkInMatch?.[1]?.trim(),
+      checkInEnd: checkInEndMatch?.[1]?.trim(),
+      checkOut: checkOutMatch?.[1]?.trim()
+    };
+  }
+  
+  // Extract minimum age
+  const ageMatch = decoded.match(/Minimum CheckIn Age:?\s*(\d+)/i);
+  if (ageMatch) {
+    info.minAge = ageMatch[1];
+  }
+  
+  // Extract fees as structured list
+  const feeSection = decoded.match(/Optional Fees:?\s*([^]*?)(?=<|$)/i);
+  if (feeSection) {
+    const fees = feeSection[1]
+      .replace(/<[^>]*>/g, '')
+      .split(/[•\n]/)
+      .map(f => f.trim())
+      .filter(f => f && f.length > 5);
+    
+    if (fees.length > 0) {
+      info.fees = fees;
+    }
+  }
+  
+  // Extract payment methods
+  const paymentMatch = decoded.match(/Cards Accepted:?\s*([^<\n]+)/i);
+  if (paymentMatch) {
+    info.paymentMethods = paymentMatch[1].split(',').map(c => c.trim());
+  }
+  
+  return info;
+};
+
+// ==================== MAIN COMPONENT ====================
+
 export function BookingConfirmation() {
   const [bookingData, setBookingData] = useState<BookingData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [expandedSections, setExpandedSections] = useState<string[]>([]);
 
   const router = useRouter();
   const params = useSearchParams();
-  const pathname = usePathname();
 
   const fetchBookingData = useCallback(async () => {
     const formData = new URLSearchParams();
 
     try {
-
       formData.append('bookingCode', params.get("booking_code") || "");
 
       const response = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}/bookingDetails`, {
@@ -125,7 +290,6 @@ export function BookingConfirmation() {
       });
       const data = await response.json();
       console.log(data);
-
     } catch (error) {
       console.error("Error fetching booking data:", error);
     } finally {
@@ -140,6 +304,15 @@ export function BookingConfirmation() {
 
   // Format date function
   const formatDate = (dateString: string): string => {
+    const options: Intl.DateTimeFormatOptions = { 
+      weekday: 'short', 
+      month: 'short', 
+      day: 'numeric' 
+    };
+    return new Date(dateString).toLocaleDateString('en-US', options);
+  };
+
+  const formatFullDate = (dateString: string): string => {
     const options: Intl.DateTimeFormatOptions = { 
       weekday: 'short', 
       month: 'short', 
@@ -167,25 +340,32 @@ export function BookingConfirmation() {
   };
 
   // Get all guests grouped by room
-  const getGuestsByRoom = (): { roomNumber: number; roomCategory: string; guests: string[] }[] => {
+  const getGuestsByRoom = (): { roomNumber: number; roomCategory: string; guests: { name: string; isLeader: boolean; age?: string }[] }[] => {
     if (!bookingData?.rooms) return [];
     
-    const roomsWithGuests: { roomNumber: number; roomCategory: string; guests: string[] }[] = [];
+    const roomsWithGuests: { roomNumber: number; roomCategory: string; guests: { name: string; isLeader: boolean; age?: string }[] }[] = [];
     let roomCounter = 1;
     
     bookingData.rooms.forEach((roomType: RoomType) => {
       roomType.rooms.forEach((room: Room) => {
-        const guests: string[] = [];
+        const guests: { name: string; isLeader: boolean; age?: string }[] = [];
         
         // Add adults for this room
         room.adults.forEach((adult: Guest, adultIndex: number) => {
-          const leaderBadge = (roomCounter === 1 && adultIndex === 0) ? ' (Leader)' : '';
-          guests.push(`${adult.title} ${adult.first_name} ${adult.last_name}${leaderBadge}`);
+          const isLeader = (roomCounter === 1 && adultIndex === 0);
+          guests.push({
+            name: `${adult.title} ${adult.first_name} ${adult.last_name}`,
+            isLeader: isLeader
+          });
         });
 
         // Add children for this room
         room.children.forEach((child: Child) => {
-          guests.push(`${child.first_name} ${child.last_name} (Child, Age: ${child.child_age})`);
+          guests.push({
+            name: `${child.first_name} ${child.last_name}`,
+            isLeader: false,
+            age: child.child_age
+          });
         });
         
         roomsWithGuests.push({
@@ -201,23 +381,40 @@ export function BookingConfirmation() {
     return roomsWithGuests;
   };
 
+  const toggleSection = (sectionType: string) => {
+    setExpandedSections(prev => 
+      prev.includes(sectionType) 
+        ? prev.filter(s => s !== sectionType)
+        : [...prev, sectionType]
+    );
+  };
+
   if (loading) {
     return (
-      <div className="max-w-3xl mx-auto p-6 bg-white text-center">
-        <div className="text-lg">Loading booking details...</div>
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-50 flex items-center justify-center">
+        <div className="bg-white/80 backdrop-blur-sm p-8 rounded-2xl shadow-xl">
+          <div className="animate-spin rounded-full h-10 w-10 border-4 border-blue-600 border-t-transparent mx-auto"></div>
+          <p className="text-sm text-gray-600 mt-4 font-medium">Loading your booking details...</p>
+        </div>
       </div>
     );
   }
 
   if (!bookingData) {
     return (
-      <div className="max-w-3xl mx-auto p-6 bg-white text-center">
-        <div className="text-lg text-red-600">Failed to load booking details</div>
-        <Link href={"/"}>
-          <Button className="mt-4 bg-[#0000FF] hover:bg-blue-700 text-white">
-            Back to Hotels home
-          </Button>
-        </Link>
+      <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-50 flex items-center justify-center p-4">
+        <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-8 max-w-md text-center shadow-xl">
+          <div className="bg-red-100 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="h-10 w-10 text-red-500" />
+          </div>
+          <h2 className="text-xl font-semibold text-gray-800 mb-2">Booking Not Found</h2>
+          <p className="text-sm text-gray-600 mb-6">We couldn't find your booking details. Please try again.</p>
+          <Link href={"/"}>
+            <Button className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-full px-8">
+              Return to Home
+            </Button>
+          </Link>
+        </div>
       </div>
     );
   }
@@ -225,311 +422,343 @@ export function BookingConfirmation() {
   const { totalAdults, totalChildren } = calculateGuestTotals();
   const guestsByRoom = getGuestsByRoom();
   const currentDate = new Date().toLocaleDateString('en-US', { 
-    year: 'numeric', 
     month: 'long', 
-    day: 'numeric',
+    day: 'numeric', 
+    year: 'numeric',
     hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short'
-  } as Intl.DateTimeFormatOptions);
+    minute: '2-digit'
+  });
 
   // Calculate price per night safely
   const pricePerNight = bookingData.nights > 0 
     ? (parseFloat(bookingData.total_price) / bookingData.nights).toFixed(2)
     : '0.00';
 
+  // Parse remarks for display
+  const remarkSections = parseRemarks(bookingData.remarks);
+  const structuredInfo = extractStructuredInfo(bookingData.remarks);
+
   return (
-    <div>
-      <div className="h-52 bg-[#F8F9FA] mb-8 flex flex-col gap-12 p-6">
-        <div className="max-w-lg mx-auto w-full flex items-center justify-between">
-          <div className="flex items-center">
-            <Lock className="w-4 h-4 text-[#808080]" />
-            <span className="ml-2 text-xs text-[#808080] tracking-widest">
-              Secure Transactions
-            </span>
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50/30">
+      {/* Compact Header */}
+      <div className="bg-white/80 backdrop-blur-sm border-b sticky top-0 z-10 shadow-sm">
+        <div className="max-w-5xl mx-auto px-4 py-3">
+          <div className="flex items-center justify-between">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.push('/')}
+              className="flex items-center gap-1 text-gray-600 hover:text-blue-600 transition-colors"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <span className="text-sm">Back to Hotels</span>
+            </Button>
 
-          <div className="flex items-center">
-            <Clock className="w-4 h-4 text-[#808080]" />
-            <span className="ml-2 text-xs text-[#808080] tracking-widest">
-              24-Hour Service{" "}
-            </span>
-          </div>
-
-          <div className="flex items-center">
-            <ShieldCheck className="w-4 h-4 text-[#808080]" />
-            <span className="ml-2 text-xs text-[#808080] tracking-widest">
-              Trusted Payments{" "}
-            </span>
-          </div>
-        </div>
-        <div className="max-w-xl w-full mx-auto flex items-center justify-between relative">
-          <div className="h-[1px] w-4/5 flex justify-center left-8 bg-[#0000ff] absolute top-5 z-0"></div>
-          <div className="flex items-center flex-col gap-2">
-            <div className="w-10 h-10 bg-[#0000FF] z-10 rounded-full flex items-center justify-center">
-              <Check className="w-4 h-4 text-white" />
+            {/* Trust Badges - Compact */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-1 text-gray-500">
+                <Lock className="h-3 w-3" />
+                <span className="text-xs hidden sm:inline">Secure</span>
+              </div>
+              <div className="flex items-center gap-1 text-gray-500">
+                <ShieldCheck className="h-3 w-3" />
+                <span className="text-xs hidden sm:inline">Protected</span>
+              </div>
             </div>
-            <span className="ml-2 text-sm font-medium  text-[#0000FF]">
-              Choose Room
-            </span>
-          </div>
-
-          <div className="flex items-center flex-col gap-2">
-            <div className="w-10 h-10 bg-[#0000FF] z-10 rounded-full flex items-center justify-center">
-              <Check className="w-4 h-4 text-white" />
-            </div>
-            <span className="ml-2 text-sm font-medium text-[#0000FF]">
-              Guest & Payment Details
-            </span>
-          </div>
-
-          <div className="flex items-center flex-col gap-2">
-            <div className="w-10 h-10 bg-[#0000FF] z-10 rounded-full flex items-center justify-center">
-              <span className="text-white text-sm font-medium">3</span>
-            </div>
-            <span className="ml-2 text-sm font-medium text-[#0000FF]">
-              Booking confirmation
-            </span>
           </div>
         </div>
       </div>
 
-      <div className="max-w-3xl mx-auto p-6 bg-white">
-        {/* Confirmation Header */}
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-4 mb-2">
-            <div>
-              <CircleCheck className="w-16 h-16 mr-2 stroke-1  text-[#008000]" />
-            </div>
-            <div className="flex flex-col items-start">
-              <span className="text-sm text-[#808080]">
-                Confirmation Code #{bookingData.booking_code}
-              </span>
-              <h1 className="text-2xl font-semibold text-[#1A1A1A]">
-                Booking {bookingData.booking_status === 'C' ? 'Confirmed' : bookingData.booking_status}
-              </h1>
-            </div>
+      <div className="max-w-5xl mx-auto p-4">
+        {/* Success Banner */}
+        <div className="bg-gradient-to-r from-emerald-50 to-green-50 border border-emerald-200 rounded-xl p-4 mb-5 flex items-center gap-3 shadow-sm">
+          <div className="bg-gradient-to-r from-green-500 to-emerald-500 rounded-full p-1.5 shadow-md">
+            <Check className="h-4 w-4 text-white" />
+          </div>
+          <div className="flex-1">
+            <p className="text-sm font-medium text-emerald-800">
+              Booking Confirmed! <span className="font-bold">#{bookingData.booking_code}</span>
+            </p>
+          </div>
+          <div className="text-xs text-emerald-700 bg-white/80 px-3 py-1 rounded-full shadow-sm">
+            {currentDate}
           </div>
         </div>
 
-        {/* Confirmation Image */}
-        <div className="mb-8">
-          <div className="relative w-full h-32 rounded-lg overflow-hidden">
-            <Image
-              src={"/bookingconformation.jpg"}
-              alt="Booking confirmation"
-              fill
-              className="object-cover"
-            />
-          </div>
-          <div className="text-center mt-4 space-y-2">
-            <p className="text-sm text-[#666666] font-medium">
-              Check your email for your order confirmation
-            </p>
-            <p className="text-sm text-[#666666]">
-              Order Date: {currentDate}
-            </p>
-          </div>
-        </div>
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          {/* Left Column - Hotel & Guest Info (2/3 width) */}
+          <div className="lg:col-span-2 space-y-5">
+            {/* Hotel Card - Compact */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-shadow">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h1 className="font-bold text-xl text-gray-800">{bookingData.hotel_name}</h1>
+                  <div className="flex items-center gap-1 text-xs text-gray-500 mt-1.5">
+                    <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                    <span>{bookingData.address || "Address not available"}</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-gray-500">Booking ID</div>
+                  <div className="text-sm font-mono bg-gradient-to-r from-blue-50 to-indigo-50 px-3 py-1.5 rounded-full text-blue-700 font-semibold">
+                    #{bookingData.booking_code}
+                  </div>
+                </div>
+              </div>
 
-        {/* Hotel Information */}
-        <Card className="mb-6 shadow-none border border-[#E6E6E6]">
-          <CardContent className="p-6">
-            <h2 className="text-xl md:text-2xl font-bold text-[#333333] mb-2">
-              {bookingData.hotel_name}
-            </h2>
-            <div className="flex items-center text-sm text-[#808080] mb-2">
-              <span className="">Hotel</span>
-            </div>
-            <div className="flex items-center text-sm text-[#808080] mb-8">
-              <MapPin className="w-4 h-4 mr-1" />
-              <span>{bookingData.address || "Address not available"}</span>
-            </div>
+              {/* Stay Details - Compact Grid */}
+              <div className="grid grid-cols-5 gap-2 mt-5 text-center text-xs">
+                <div className="bg-gradient-to-b from-gray-50 to-white p-2.5 rounded-lg border border-gray-100">
+                  <Calendar className="h-3.5 w-3.5 mx-auto text-blue-500" />
+                  <div className="font-medium mt-1 text-gray-800">{formatDate(bookingData.check_in)}</div>
+                  <div className="text-gray-500 text-[10px]">Check-in</div>
+                </div>
+                <div className="bg-gradient-to-b from-gray-50 to-white p-2.5 rounded-lg border border-gray-100">
+                  <Calendar className="h-3.5 w-3.5 mx-auto text-orange-500" />
+                  <div className="font-medium mt-1 text-gray-800">{formatDate(bookingData.check_out)}</div>
+                  <div className="text-gray-500 text-[10px]">Check-out</div>
+                </div>
+                <div className="bg-gradient-to-b from-gray-50 to-white p-2.5 rounded-lg border border-gray-100">
+                  <Moon className="h-3.5 w-3.5 mx-auto text-indigo-500" />
+                  <div className="font-medium mt-1 text-gray-800">{bookingData.nights}</div>
+                  <div className="text-gray-500 text-[10px]">Nights</div>
+                </div>
+                <div className="bg-gradient-to-b from-gray-50 to-white p-2.5 rounded-lg border border-gray-100">
+                  <User className="h-3.5 w-3.5 mx-auto text-green-500" />
+                  <div className="font-medium mt-1 text-gray-800">{totalAdults}</div>
+                  <div className="text-gray-500 text-[10px]">Adults</div>
+                </div>
+                <div className="bg-gradient-to-b from-gray-50 to-white p-2.5 rounded-lg border border-gray-100">
+                  <Home className="h-3.5 w-3.5 mx-auto text-purple-500" />
+                  <div className="font-medium mt-1 text-gray-800">{bookingData.total_rooms}</div>
+                  <div className="text-gray-500 text-[10px]">Rooms</div>
+                </div>
+              </div>
 
-            {/* Room Information */}
-            <div className="space-y-4">
-              {bookingData.rooms.map((roomType: RoomType, roomTypeIndex: number) => (
-                <div key={roomTypeIndex} className="space-y-3">
-                  {roomType.rooms.map((room: Room, roomIndex: number) => (
-                    <div key={roomIndex} className="border border-[#E6E6E6] rounded-lg p-4 bg-[#FAFBFC]">
-                      <div className="flex justify-between items-start mb-3">
-                        <div>
-                          <h3 className="font-semibold text-[#333333] text-lg">
-                            Room {roomTypeIndex * roomType.rooms.length + roomIndex + 1}: {room.category}
-                          </h3>
-                          {roomType.type && (
-                            <p className="text-sm text-[#666666] mt-1">Type: {roomType.type}</p>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <div className="text-sm font-medium text-[#333333]">
-                            Room {roomTypeIndex * roomType.rooms.length + roomIndex + 1}
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-[#666666]">
-                        <div className="space-y-2">
-                          <div className="flex items-center">
-                            <CircleCheck className="w-4 h-4 mr-2 text-green-600" />
-                            <span>Adults: {room.total_adults}</span>
-                          </div>
-                          {room.total_children > 0 && (
-                            <div className="flex items-center">
-                              <CircleCheck className="w-4 h-4 mr-2 text-green-600" />
-                              <span>Children: {room.total_children}</span>
+              {/* Room Details - Compact Cards */}
+              <div className="mt-5 space-y-3">
+                {bookingData.rooms.map((roomType: RoomType, typeIndex: number) => (
+                  <div key={typeIndex}>
+                    {roomType.rooms.map((room: Room, roomIndex: number) => (
+                      <div key={roomIndex} className="border border-gray-200 rounded-lg p-3 bg-gradient-to-r from-gray-50/50 to-white hover:border-blue-200 transition-colors">
+                        <div className="flex justify-between items-center mb-2">
+                          <div className="flex items-center gap-2">
+                            <div className="bg-gradient-to-r from-blue-500 to-indigo-500 text-white text-xs font-medium px-2.5 py-1 rounded-full shadow-sm">
+                              Room {typeIndex * roomType.rooms.length + roomIndex + 1}
                             </div>
-                          )}
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <div className="flex items-center">
-                            <CircleCheck className="w-4 h-4 mr-2 text-green-600" />
-                            <span>Basis: {bookingData.room_basis}</span>
+                            <span className="text-sm font-medium text-gray-700">{room.category}</span>
                           </div>
+                          <span className="text-xs bg-gray-100 px-2 py-1 rounded-full text-gray-600">
+                            {room.total_adults} Adult · {room.total_children} Child
+                          </span>
                         </div>
-                        
-                        <div className="space-y-2">
-                          <div className="flex items-center">
-                            <CircleCheck className="w-4 h-4 mr-2 text-green-600" />
-                            <span>Total Guests: {room.total_adults + room.total_children}</span>
-                          </div>
-                        </div>
+                        <p className="text-xs text-gray-500 flex items-center gap-1">
+                          <span className="font-medium">Basis:</span> {bookingData.room_basis}
+                        </p>
                       </div>
-
-                    </div>
-                  ))}
-                </div>
-              ))}
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
 
-            {/* Booking Details */}
-            <div className="grid grid-cols-5 gap-4 mt-6 p-6 rounded-lg bg-[#F8F9FA] border-gray-200">
-              <div className="text-center w-full">
-                <div className="text-sm font-medium text-[#333333]">
-                  {formatDate(bookingData.check_in)}
-                </div>
-                <div className="text-xs text-[#808080]">Check-in</div>
-              </div>
-              <div className="text-center">
-                <div className="text-sm font-medium text-[#333333]">
-                  {formatDate(bookingData.check_out)}
-                </div>
-                <div className="text-xs text-[#808080]">Check-out</div>
-              </div>
-              <div className="text-center">
-                <div className="text-sm font-medium text-[#333333]">
-                  {bookingData.nights}
-                </div>
-                <div className="text-xs text-[#808080]">Nights</div>
-              </div>
-              <div className="text-center">
-                <div className="text-sm font-medium text-[#333333]">
-                  {totalAdults}
-                </div>
-                <div className="text-xs text-[#808080]">Adults</div>
-              </div>
-              <div className="text-center">
-                <div className="text-sm font-medium text-[#333333]">
-                  {bookingData.total_rooms}
-                </div>
-                <div className="text-xs text-[#808080]">Rooms</div>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Guest Information - Arranged by Rooms */}
-        <Card className="mb-6 p-0 shadow-none border border-[#E6E6E6]">
-          <CardContent className="p-6">
-            <h3 className="font-medium text-[#4D4D4D] mb-4">Guest (s)</h3>
-            <hr className="mb-4" />
-            
-            {guestsByRoom.map((roomGroup, roomIndex) => (
-              <div key={roomIndex} className="mb-6 last:mb-0">
-                <div className="mb-3">
-                  <div className="text-sm font-semibold text-[#333333] mb-1">
-                    Room {roomGroup.roomNumber}: {roomGroup.roomCategory}
-                  </div>
-                  <div className="text-xs text-[#808080]">
-                    {roomGroup.guests.length} guest(s)
-                  </div>
-                </div>
-                
-                <div className="space-y-3 ml-4">
-                  {roomGroup.guests.map((guest: string, guestIndex: number) => (
-                    <div key={guestIndex} className="space-y-1">
-                      <div className="text-xs text-[#808080] tracking-wide">
-                        Guest {guestIndex + 1}
-                      </div>
-                      <div className="font-medium text-[#333333]">{guest}</div>
+            {/* Guest Information - Compact by Room */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm hover:shadow-md transition-shadow">
+              <h3 className="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                <Users className="h-4 w-4 text-blue-500" />
+                Guest Information
+              </h3>
+              
+              <div className="space-y-4">
+                {guestsByRoom.map((roomGroup, roomIndex) => (
+                  <div key={roomIndex} className="border-b border-gray-100 last:border-0 pb-4 last:pb-0">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-medium text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                        Room {roomGroup.roomNumber} · {roomGroup.roomCategory}
+                      </span>
+                      <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-full">
+                        {roomGroup.guests.length} guest(s)
+                      </span>
                     </div>
-                  ))}
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {roomGroup.guests.map((guest, guestIndex) => (
+                        <div key={guestIndex} className="flex items-start gap-2 text-sm bg-gray-50 p-2 rounded-lg">
+                          <div className="mt-0.5">
+                            {guest.isLeader ? (
+                              <span className="text-xs bg-gradient-to-r from-green-500 to-emerald-500 text-white px-2 py-0.5 rounded-full">Lead</span>
+                            ) : (
+                              <span className="text-xs text-gray-400 w-4 inline-block text-center">•</span>
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <span className="text-gray-800 font-medium">{guest.name}</span>
+                            {guest.age && (
+                              <span className="text-xs text-gray-500 ml-1">(Age: {guest.age})</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Remarks Section - Beautifully Formatted */}
+              {bookingData.remarks && remarkSections.length > 0 && (
+                <div className="mt-5 pt-4 border-t border-gray-200">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-indigo-500" />
+                    Hotel Policies & Important Information
+                  </h4>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {remarkSections.map((section, idx) => (
+                      <div 
+                        key={idx} 
+                        className="bg-gradient-to-br from-white to-gray-50 border border-gray-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-all hover:border-indigo-200"
+                      >
+                        <div className="flex items-center gap-2 mb-2 pb-1.5 border-b border-gray-100">
+                          <div className="p-1.5 bg-gradient-to-br from-indigo-50 to-blue-50 rounded-lg">
+                            {section.icon}
+                          </div>
+                          <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                            {section.title}
+                          </span>
+                        </div>
+                        
+                        {section.items.length === 1 ? (
+                          <p className="text-xs text-gray-600 leading-relaxed">{section.items[0]}</p>
+                        ) : (
+                          <ul className="space-y-1.5">
+                            {section.items.map((item, itemIdx) => (
+                              <li key={itemIdx} className="text-xs text-gray-600 flex items-start gap-2">
+                                <span className="text-indigo-400 mt-1 text-sm">•</span>
+                                <span className="leading-relaxed flex-1">{item}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                
-                {roomIndex < guestsByRoom.length - 1 && (
-                  <hr className="my-4" />
+              )}
+
+              {/* Quick Info Row from Structured Data */}
+              {structuredInfo && (
+                <div className="mt-4 flex flex-wrap gap-2 pt-3">
+                  {structuredInfo.timing?.checkIn && (
+                    <div className="text-xs bg-blue-50 text-blue-700 px-3 py-1.5 rounded-full flex items-center gap-1">
+                      <Key className="h-3 w-3" />
+                      Check-in: {structuredInfo.timing.checkIn}
+                    </div>
+                  )}
+                  {structuredInfo.timing?.checkOut && (
+                    <div className="text-xs bg-orange-50 text-orange-700 px-3 py-1.5 rounded-full flex items-center gap-1">
+                      <Luggage className="h-3 w-3" />
+                      Check-out: {structuredInfo.timing.checkOut}
+                    </div>
+                  )}
+                  {structuredInfo.minAge && (
+                    <div className="text-xs bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-full flex items-center gap-1">
+                      <Baby className="h-3 w-3" />
+                      Min. Age: {structuredInfo.minAge}+
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column - Price Summary & Actions (1/3 width) */}
+          <div className="space-y-5">
+            {/* Price Summary Card */}
+            <div className="bg-white rounded-xl border border-gray-200 p-5 sticky top-20 shadow-sm hover:shadow-md transition-shadow">
+              <h3 className="font-semibold text-gray-700 mb-4 flex items-center gap-2">
+                <DollarSign className="h-4 w-4 text-green-500" />
+                Price Summary
+              </h3>
+              
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between text-gray-600 pb-2 border-b border-gray-100">
+                  <span>Price per night</span>
+                  <span className="font-medium text-gray-800">{bookingData.currency} {pricePerNight}</span>
+                </div>
+                <div className="flex justify-between text-gray-600">
+                  <span>Adults ({totalAdults})</span>
+                  <span className="text-green-600">Included</span>
+                </div>
+                {totalChildren > 0 && (
+                  <div className="flex justify-between text-gray-600">
+                    <span>Children ({totalChildren})</span>
+                    <span className="text-green-600">Included</span>
+                  </div>
                 )}
+                <div className="flex justify-between text-gray-600">
+                  <span>Nights</span>
+                  <span className="font-medium text-gray-800">{bookingData.nights}</span>
+                </div>
+                <div className="border-t border-gray-200 pt-3 mt-3">
+                  <div className="flex justify-between font-semibold text-base">
+                    <span>Total</span>
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">
+                      {bookingData.currency} {bookingData.total_price}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1 text-right">Includes all taxes & fees</p>
+                </div>
               </div>
-            ))}
-            
-            <hr className="my-4" />
 
-            <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-              <div className="text-xs text-[#808080] uppercase tracking-wide mb-1">
-                IMPORTANT NOTES
-              </div>
-              <p className="text-sm text-[#666666] whitespace-pre-line">
-                <span dangerouslySetInnerHTML={{ __html: bookingData.remarks ?? "No additional remarks provided." }} />
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+              {/* Cancellation Info */}
+              {bookingData.cancellation_deadline && (
+                <div className="mt-5 pt-4 border-t border-gray-200">
+                  <div className="flex items-start gap-2 text-xs text-emerald-700 bg-gradient-to-r from-emerald-50 to-green-50 p-3 rounded-xl border border-emerald-100">
+                    <Calendar className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                    <span>
+                      <span className="font-semibold">Free cancellation</span> before {formatFullDate(bookingData.cancellation_deadline)}
+                    </span>
+                  </div>
+                </div>
+              )}
 
-        {/* Pricing Breakdown */}
-        <Card className="mb-6 p-0 shadow-none border border-[#E6E6E6]">
-          <CardContent className="p-6">
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between text-sm">
-                <span className="text-[#666666]">Price per night</span>
-                <span className="font-medium">
-                  {bookingData.currency} {pricePerNight}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-[#666666]">Adult(s)</span>
-                <span className="font-medium">{totalAdults}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-[#666666]">Children</span>
-                <span className="font-medium">{totalChildren}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-[#666666]">Number of nights</span>
-                <span className="font-medium">{bookingData.nights}</span>
-              </div>
-              <hr className="my-3" />
-              <div className="flex justify-between text-sm">
-                <span className="text-[#666666]">Subtotal</span>
-                <span className="font-medium">
-                  {bookingData.currency} {bookingData.total_price}
-                </span>
-              </div>
-              <hr className="my-3" />
-              <div className="flex justify-between text-base font-medium text-[#4D4D4D]">
-                <span>Total Charges</span>
-                <span>{bookingData.currency} {bookingData.total_price}</span>
+              {/* Action Buttons */}
+              <div className="mt-5 space-y-2">
+                <Button 
+                  variant="outline"
+                  className="w-full h-11 text-sm rounded-xl border-gray-300 hover:border-blue-400 hover:text-blue-600 transition-all"
+                  onClick={() => router.push('/')}
+                >
+                  Browse More Hotels
+                </Button>
               </div>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Back Button */}
-        <Link href={"/"}>
-          <Button className="w-full bg-[#0000FF] hover:bg-blue-700 text-white py-6 text-sm font-medium">
-            Back to Hotels home
-          </Button>
-        </Link>
+            {/* Need Help Card */}
+            <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl border border-indigo-100 p-5 shadow-sm">
+              <h4 className="text-sm font-semibold text-indigo-900 mb-3 flex items-center gap-2">
+                <span className="text-lg">🛟</span>
+                Need Help?
+              </h4>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center gap-2 text-indigo-700 bg-white/60 p-2 rounded-lg">
+                  <Mail className="h-3.5 w-3.5" />
+                  <span>support@travelhub.com</span>
+                </div>
+                <div className="flex items-center gap-2 text-indigo-700 bg-white/60 p-2 rounded-lg">
+                  <Phone className="h-3.5 w-3.5" />
+                  <span>+1 (800) 123-4567</span>
+                </div>
+              </div>
+              <div className="mt-3 pt-2 border-t border-indigo-200">
+                <p className="text-xs text-indigo-600">
+                  Quote booking code: <span className="font-mono font-bold bg-indigo-100 px-2 py-0.5 rounded">{bookingData.booking_code}</span>
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

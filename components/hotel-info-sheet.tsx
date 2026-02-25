@@ -30,7 +30,7 @@ interface HotelInfo {
   category: number;
   city_code: number;
   coordinates: { longitude: number; latitude: number };
-  description: string;
+  description: string ;
   facilities: string[];
   hotel_id: number;
   hotel_name: string;
@@ -204,7 +204,6 @@ export default function HotelInfoSheet({
               </div>
 
               {/* Navigation Tabs */}
-
               <Tabs defaultValue={tab} className="mb-6 w-full">
                 <TabsList className="flex-wrap items-start">
                   {tabs.map((tab) => (

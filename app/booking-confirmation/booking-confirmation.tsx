@@ -127,7 +127,7 @@ const parseRemarks = (remarks: string): RemarkSection[] => {
   const sections = decoded.split(/<br\s*\/?>|\n|<li>|<\/li>|<ul>|<\/ul>|<p>|<\/p>/i).filter(s => s.trim());
   
   const parsedSections: RemarkSection[] = [];
-  let currentSection: { type: string; items: string[] } | null = null;
+  let currentSection: { type: string | null, items: string[] } | null = null;
   
   // Define section types with their patterns
   const sectionPatterns = [

@@ -118,16 +118,16 @@ const decodeHtmlEntities = (text: string): string => {
 };
 
 const parseRemarks = (remarks: string): RemarkSection[] => {
-  if (!remarks) return [];
-  
-  // Decode HTML entities first
-  const decoded = decodeHtmlEntities(remarks);
-  
-  // Split by common delimiters
-  const sections = decoded.split(/<br\s*\/?>|\n|<li>|<\/li>|<ul>|<\/ul>|<p>|<\/p>/i).filter(s => s.trim());
-  
-  const parsedSections: RemarkSection[] = [];
-  let currentSection: { type: string | null, items: string[] } | null = null;
+if (!remarks) return [];
+
+// Decode HTML entities first
+const decoded = decodeHtmlEntities(remarks);
+
+// Split by common delimiters
+const sections = decoded.split(/<br\s*\/?>|\n|<li>|<\/li>|<ul>|<\/ul>|<p>|<\/p>/i).filter(s => s.trim());
+
+const parsedSections: RemarkSection[] = [];
+let currentSection: { type: string, items: string[] } | null = null;
   
   // Define section types with their patterns
   const sectionPatterns = [
@@ -159,7 +159,7 @@ const parseRemarks = (remarks: string): RemarkSection[] => {
     }
     
     // If it's the same as current section, add to it
-    if (currentSection?.type === detectedType) {
+    if (currentSection && currentSection?.type === detectedType) {
       currentSection.items.push(cleanSection);
     } else {
       // Save previous section
@@ -182,7 +182,7 @@ const parseRemarks = (remarks: string): RemarkSection[] => {
   
   // Add the last section
   if (currentSection) {
-    const pattern = sectionPatterns.find(p => p.type === currentSection.type) || 
+    const pattern = sectionPatterns.find(p => p.type === currentSection?.type) || 
       { type: 'general', icon: <FileText className="h-4 w-4 text-gray-400" />, title: 'Additional Information' };
     
     parsedSections.push({

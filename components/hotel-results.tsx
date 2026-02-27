@@ -71,6 +71,11 @@ const HotelResults = ({ loading, results }: { loading?: boolean; results: any })
     Special: string;
     TotalPrice: number;
     RoomBasis: string;
+    CancellationPolicies: any[];
+    Fee: any[];
+    CxlDeadLine?: string | undefined;
+    Availability?: number | undefined;
+    NonRef?: boolean | undefined;
   } | undefined>(undefined);
   const [destinationname, setDestinationname] = useState<string | null>("");
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
@@ -205,6 +210,11 @@ const HotelResults = ({ loading, results }: { loading?: boolean; results: any })
     Special: string;
     TotalPrice: number;
     RoomBasis: string;
+    CancellationPolicies: any[];
+    Fee: any[];
+    CxlDeadLine?: string | undefined;
+    Availability?: number | undefined;
+    NonRef?: boolean | undefined;
   }, roomFeatures: any[]) => {
     setSelectedRoom(room);
     setSelectedRoomFeatures(roomFeatures);

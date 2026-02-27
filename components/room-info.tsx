@@ -23,9 +23,9 @@ interface RoomInfoSheetProps {
     RoomBasis: string;
     CancellationPolicies: any[];
     Fee: any[];
-    CxlDeadLine?: string;
-    Availability?: number;
-    NonRef?: boolean;
+    CxlDeadLine?: string | undefined;
+    Availability?: number | undefined;
+    NonRef?: boolean | undefined;
   };
   roomFeatures: any[];
 }
